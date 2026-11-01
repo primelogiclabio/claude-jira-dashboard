@@ -1,0 +1,1252 @@
+<title>Jira Dashboard</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one column, summary strip on top, then the tab's ticket table; rows stack into cards on phones. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #18202e;
+  --muted: #5d6779;
+  --line: #dde2ea;
+  --accent: #0d6b6b;
+  --todo-fg: #44505f; --todo-bg: #e7eaef;
+  --progress-fg: #1f4fae; --progress-bg: #e3ebfb;
+  --done-fg: #1f6b40; --done-bg: #e0f1e7;
+  --warn: #9a5a00;
+  --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+/* Elements given display: grid or flex below still hide when marked hidden. */
+[hidden] { display: none !important; }
+/* JQL must read exactly as typed: no >= or != ligatures. */
+code, .host, td.key, .tab .count { font-variant-ligatures: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1318; --surface: #171c24; --ink: #e3e8ef; --muted: #97a1b2; --line: #29313d; --accent: #5ec7bf;
+    --todo-fg: #b6bfcc; --todo-bg: #262d37; --progress-fg: #94b8ff; --progress-bg: #1c2943; --done-fg: #84d3a5; --done-bg: #17301f;
+    --warn: #e7a84a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1318; --surface: #171c24; --ink: #e3e8ef; --muted: #97a1b2; --line: #29313d; --accent: #5ec7bf;
+  --todo-fg: #b6bfcc; --todo-bg: #262d37; --progress-fg: #94b8ff; --progress-bg: #1c2943; --done-fg: #84d3a5; --done-bg: #17301f;
+  --warn: #e7a84a;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 18px;
+}
+
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-stretch: 82%;
+  font-weight: 700;
+  font-size: 1.7rem;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.site { color: var(--muted); font-size: 0.93rem; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.site .host { font-family: var(--font-mono); font-size: 0.82rem; }
+.refreshed { color: var(--muted); font-size: 0.93rem; font-variant-numeric: tabular-nums; }
+.side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.theme { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.theme button {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: 0.8rem; color: var(--muted);
+  padding: 3px 10px;
+}
+.theme button + button { border-left: 1px solid var(--line); }
+.theme button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; }
+.theme button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.summary {
+  display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: baseline;
+  padding-block: 14px;
+  border-block: 1px solid var(--line);
+}
+.summary .big { font-family: var(--font-display); font-stretch: 82%; font-weight: 600; font-size: 1.25rem; }
+.summary .big b { font-variant-numeric: tabular-nums; }
+.summary .parts { display: flex; flex-wrap: wrap; gap: 6px 26px; color: var(--muted); font-size: 0.93rem; font-variant-numeric: tabular-nums; }
+.summary .parts span b { color: var(--ink); font-weight: 600; }
+.summary .group { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tab {
+  appearance: none; background: none; border: 0; cursor: pointer;
+  font: inherit; font-family: var(--font-display); font-stretch: 88%; font-weight: 600; font-size: 0.98rem;
+  color: var(--muted);
+  padding: 8px 12px 9px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.tab .count { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); margin-left: 6px; font-weight: 500; }
+.tab .count.due { color: var(--bg); background: var(--accent); border-radius: 999px; padding: 1px 7px; }
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tab { white-space: nowrap; }
+td.key .review { display: inline-flex; vertical-align: middle; margin-right: 8px; cursor: pointer; }
+td.key .review input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.chip {
+  display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600; color: var(--warn); border: 1px solid currentColor; white-space: nowrap;
+}
+tr.reviewed td:not(.key), tr.reviewed td.key a { opacity: 0.55; }
+.caption .actions { gap: 6px 12px; }
+.multi { display: grid; gap: 8px; }
+.multi-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 30px; }
+.token {
+  appearance: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  font: inherit; font-size: 0.88rem; color: var(--ink);
+  border: 1px solid var(--accent); border-radius: 999px; padding: 2px 4px 2px 11px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.token span { color: var(--muted); font-size: 1.05rem; line-height: 1; padding: 0 4px; }
+.token:hover span { color: var(--ink); }
+.token:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.optpanel {
+  display: grid; gap: 10px; max-height: 22rem; overflow: auto;
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--bg);
+}
+.optpanel input[type="search"] {
+  position: sticky; top: 0; z-index: 1;
+  font: inherit; font-size: 0.9rem; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px;
+}
+.optpanel input[type="search"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.optgroup { display: grid; gap: 4px; }
+.optgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0 12px; }
+.optgrid label {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: 0.9rem;
+}
+.optgrid label:hover { background: var(--surface); }
+.optgrid label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.optgrid input { accent-color: var(--accent); margin: 0; flex: none; }
+.viewpick select {
+  font: inherit; font-size: 0.88rem; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px;
+}
+.viewpick select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.panel { display: grid; gap: 10px; }
+.caption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; color: var(--muted); font-size: 0.88rem; }
+.more a, .caption a, .note a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.more a:hover, .caption a:hover, .note a:hover { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.tablewrap { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; font-weight: 600; font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tbody tr:last-child td { border-bottom: 0; }
+td.key { white-space: nowrap; }
+td.key a { font-family: var(--font-mono); font-size: 0.86rem; color: var(--accent); text-decoration: none; }
+td.key a:hover { text-decoration: underline; }
+td.sum { min-width: 13rem; }
+td.type, td.who, td.when { color: var(--muted); font-size: 0.93rem; }
+td.who, td.when { white-space: nowrap; }
+td.status { max-width: 12rem; }
+td.when { font-variant-numeric: tabular-nums; }
+.unassigned { font-style: italic; }
+
+.lz {
+  display: inline-block;
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 3px;
+  color: var(--todo-fg); background: var(--todo-bg);
+}
+.lz.progress { color: var(--progress-fg); background: var(--progress-bg); }
+.lz.done { color: var(--done-fg); background: var(--done-bg); }
+
+.note {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 22px 20px; color: var(--muted);
+}
+.note strong { color: var(--ink); display: block; font-family: var(--font-display); font-stretch: 88%; font-size: 1.05rem; margin-bottom: 4px; }
+.warn { color: var(--warn); }
+
+.settings { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.settings > summary {
+  cursor: pointer; padding: 12px 16px;
+  font-family: var(--font-display); font-stretch: 88%; font-weight: 600; font-size: 0.98rem;
+}
+.settings > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.settings .body { display: grid; padding: 0 16px; border-top: 1px solid var(--line); }
+.settings .sub { display: grid; gap: 14px; padding-block: 14px 16px; }
+.settings .sub + .sub { border-top: 1px solid var(--line); }
+.timefield { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--muted); }
+.timefield input {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+}
+.timefield input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.settings h2 { margin: 0; font-size: 0.95rem; font-weight: 600; }
+.settings h3 { margin: 6px 0 0; }
+.tabpick { justify-self: start; }
+.settings p { margin: 0; color: var(--muted); font-size: 0.9rem; max-width: 65ch; }
+.group-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.typegroup { display: grid; gap: 6px; }
+.typegrid { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.typegrid label {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  padding: 4px 11px 4px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 0.9rem;
+}
+.typegrid label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.typegrid input { accent-color: var(--accent); margin: 0; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.btn {
+  appearance: none; cursor: pointer; font: inherit; font-size: 0.9rem;
+  padding: 5px 14px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.msg { color: var(--muted); font-size: 0.88rem; }
+.msg:empty { display: none; }
+.query { color: var(--muted); font-size: 0.82rem; overflow-wrap: anywhere; }
+.query code { font-family: var(--font-mono); font-size: 0.78rem; }
+
+@media (max-width: 860px) {
+  h1 { font-size: 1.45rem; }
+  .side { align-items: flex-start; }
+  .tablewrap { background: none; border: 0; border-radius: 0; overflow: visible; }
+  table, tbody { display: block; }
+  thead { display: none; }
+  tbody { display: grid; gap: 8px; }
+  tbody tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px 10px;
+    grid-template-areas: "key key status" "sum sum sum" "type who when";
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  }
+  td { padding: 0; border: 0; }
+  td.key { grid-area: key; }
+  td.status { grid-area: status; justify-self: end; }
+  td.sum { grid-area: sum; min-width: 0; }
+  td.type { grid-area: type; font-size: 0.86rem; }
+  td.who { grid-area: who; font-size: 0.86rem; white-space: normal; overflow-wrap: anywhere; }
+  td.when { grid-area: when; font-size: 0.86rem; }
+}
+</style>
+
+<div class="page">
+  <header>
+    <div>
+      <h1>Jira Dashboard</h1>
+      <div class="site" id="site"></div>
+    </div>
+    <div class="side">
+      <div class="refreshed" id="refreshed"></div>
+      <div class="actions" id="refresh-row" hidden>
+        <span class="msg" id="refresh-msg" role="status"></span>
+        <button type="button" class="btn" id="refresh-now">Refresh</button>
+      </div>
+      <div class="theme" role="group" aria-label="Theme">
+        <button type="button" id="theme-auto" data-theme-choice="auto" aria-pressed="true">Auto</button>
+        <button type="button" id="theme-light" data-theme-choice="light" aria-pressed="false">Light</button>
+        <button type="button" id="theme-dark" data-theme-choice="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+  </header>
+  <script>
+  // Theme switch: Auto keeps whatever claude.ai set; Light and Dark override it on this device only.
+  (() => {
+    const root = document.documentElement;
+    const host = root.getAttribute('data-theme');
+    const buttons = document.querySelectorAll('[data-theme-choice]');
+    function apply(choice) {
+      if (choice === 'light' || choice === 'dark') root.setAttribute('data-theme', choice);
+      else if (host) root.setAttribute('data-theme', host);
+      else root.removeAttribute('data-theme');
+      buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)));
+    }
+    let saved = 'auto';
+    try { saved = localStorage.getItem('jira-dashboard-theme') || 'auto'; } catch (e) { /* storage blocked: follow claude.ai */ }
+    apply(saved);
+    buttons.forEach((b) => b.addEventListener('click', () => {
+      apply(b.dataset.themeChoice);
+      try { localStorage.setItem('jira-dashboard-theme', b.dataset.themeChoice); } catch (e) { /* not remembered, still switches */ }
+    }));
+  })();
+  </script>
+  <div class="summary" id="summary" hidden></div>
+  <div class="tabs" role="tablist" id="tabs"></div>
+  <section class="panel" id="panel" role="tabpanel"></section>
+  <details class="settings" id="settings" hidden>
+    <summary>Settings</summary>
+    <div class="body">
+      <section class="sub" id="settings-schedule"></section>
+      <section class="sub" id="settings-projects"></section>
+      <section class="sub" id="settings-types"></section>
+    </div>
+  </details>
+</div>
+
+<script>
+(() => {
+  // Each tab is one database document holding its rows. New and Recent carry a review mark per ticket.
+  const TABS = [
+    { id: 'new', label: 'New Tickets', doc: 'tabs/new', review: true, empty: 'No new tickets' },
+    { id: 'recent', label: 'Recent', doc: 'tabs/recent', review: true, empty: 'No tickets updated' },
+    { id: 'mine', label: 'My Tickets', doc: 'tabs/mine', review: false, empty: 'No open tickets assigned to you' },
+  ];
+  const CATEGORY = { 'To Do': 'todo', 'In Progress': 'progress', 'Done': 'done' };
+  // Mirrors SKILL.md's Setup: the row cap per search, the carried-over cap per tab, and the schedule used before one is set.
+  const CAP = 25;
+  const CARRY_CAP = 50;
+  const DEFAULT_SCHEDULE = { days: [1, 2, 3, 4, 5], time: '08:00' };
+  const JIRA = 'Atlassian MCP';
+  const state = { refresh: undefined, tabs: {}, settings: undefined, types: undefined, reviews: {}, db: null, mcp: null, active: 'new', slow: false, error: '', closed: '' };
+  const pull = { running: false, msg: '' };
+  const marking = { keys: new Set(), all: '' };
+  // The settings form keeps its own draft so live updates never undo unsaved ticks.
+  const ui = { views: {}, proj: { draft: new Set(), dirty: false, saving: false, msg: '', key: '' }, settingsTab: 'new', draft: { types: new Set(), statuses: new Set() }, dirty: false, saving: false, requesting: false, msg: '', key: '',
+    sched: { days: new Set(), time: '' }, schedDirty: false, schedSaving: false, schedMsg: '', schedKey: '' };
+
+  const $ = (id) => document.getElementById(id);
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === 'class') el.className = v; else el.setAttribute(k, v === true ? '' : v);
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid);
+    return el;
+  }
+  const safeUrl = (u) => (typeof u === 'string' && u.startsWith('https://') ? u : null);
+  const toDate = (iso) => { const d = new Date(iso); return isNaN(d) ? null : d; };
+
+  // "Fri 18:17" within the last six days, else "Oct 30, 18:17".
+  function dayTime(iso) {
+    const d = toDate(iso);
+    if (!d) return '';
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const recent = Date.now() - d.getTime() < 6 * 86400000;
+    const day = recent ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return day + (recent ? ' ' : ', ') + time;
+  }
+  function ago(iso) {
+    const d = toDate(iso);
+    if (!d) return '';
+    const min = Math.round((Date.now() - d.getTime()) / 60000);
+    if (min < 1) return 'just now';
+    if (min < 60) return min + ' min ago';
+    const hr = Math.round(min / 60);
+    if (hr < 36) return hr + ' h ago';
+    const days = Math.round(hr / 24);
+    return days + (days === 1 ? ' day ago' : ' days ago');
+  }
+  const typeList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : []);
+  const sameTypes = (a, b) => a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
+  // Each tab filters by ticket types (none means every type) and hides the statuses listed.
+  // A dashboard saved before per-tab settings had one issueTypes list, for New Tickets and Recent.
+  function savedFilter(id) {
+    const s = state.settings || {};
+    const f = s.tabs && s.tabs[id];
+    if (f) return { issueTypes: typeList(f.issueTypes), ignoreStatuses: typeList(f.ignoreStatuses) };
+    return { issueTypes: id === 'mine' ? [] : typeList(s.issueTypes), ignoreStatuses: [] };
+  }
+  // The projects New Tickets and Recent search: the page's setting, else the ones the last refresh used.
+  function trackedProjects() {
+    const own = typeList(state.settings && state.settings.projects);
+    return own.length ? own : typeList(state.refresh && state.refresh.projects);
+  }
+  const projectOf = (row) => String((row && row.key) || '').split('-')[0];
+  // Each tab's project view is a per-device convenience: browser storage, "all" when it can't be read.
+  function viewOf(id) {
+    if (ui.views[id]) return ui.views[id];
+    let v = 'all';
+    try { v = localStorage.getItem('jira-dashboard-view-' + id) || 'all'; } catch (e) { /* storage blocked: show all */ }
+    return (ui.views[id] = v);
+  }
+  function setView(id, v) {
+    ui.views[id] = v;
+    try { localStorage.setItem('jira-dashboard-view-' + id, v); } catch (e) { /* not remembered, still filters */ }
+    render();
+  }
+  const usedFilter = (t) => ({ issueTypes: typeList(t && t.issueTypes), ignoreStatuses: typeList(t && t.ignoreStatuses) });
+  const sameFilter = (a, b) => sameTypes(a.issueTypes, b.issueTypes) && sameTypes(a.ignoreStatuses, b.ignoreStatuses);
+  const CATEGORY_NAME = { new: 'To Do', indeterminate: 'In Progress', done: 'Done' };
+
+  // A row is reviewed while its review exists and the ticket hasn't been updated since.
+  function isReviewed(row) {
+    const rev = row && state.reviews[row.key];
+    if (!rev) return false;
+    const seenAt = toDate(rev.updated), now = toDate(row.updated);
+    return !!seenAt && (!now || now <= seenAt);
+  }
+  const rowsOf = (t) => (t && Array.isArray(t.rows) ? t.rows : []);
+  const toReview = (t) => rowsOf(t).filter((r) => !isReviewed(r)).length;
+  const keyOk = (k) => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,100}$/.test(k);
+
+  // A schedule is {days: [0-6, Sunday first as in cron], time: "HH:MM"}.
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const WEEK = [1, 2, 3, 4, 5, 6, 0];
+  function normSchedule(s) {
+    if (!s || !Array.isArray(s.days) || typeof s.time !== 'string' || !/^\d{2}:\d{2}$/.test(s.time)) return null;
+    const days = [...new Set(s.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+    return days.length ? { days, time: s.time } : null;
+  }
+  const sameSchedule = (a, b) => !!a && !!b && a.time === b.time && a.days.join() === b.days.join();
+  function describeDays(days) {
+    const key = days.join();
+    if (key === '1,2,3,4,5') return 'Weekdays';
+    if (key === '0,1,2,3,4,5,6') return 'Every day';
+    if (key === '0,6') return 'Weekends';
+    return WEEK.filter((d) => days.includes(d)).map((d) => DAY_NAMES[d]).join(', ');
+  }
+  function fmtTime(time) {
+    const [hh, mm] = time.split(':').map(Number);
+    return new Date(2000, 0, 1, hh, mm).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  // "on weekdays at 8:00 AM", "every day at 7:30 AM", "on Mon, Thu at 9:00 AM"
+  function describeSchedule(s) {
+    const d = describeDays(s.days);
+    const when = d === 'Every day' ? 'every day' : 'on ' + (d === 'Weekdays' || d === 'Weekends' ? d.toLowerCase() : d);
+    return when + ' at ' + fmtTime(s.time);
+  }
+  function nextRun(s) {
+    if (!s) return null;
+    const [hh, mm] = s.time.split(':').map(Number);
+    const now = new Date();
+    for (let i = 0; i < 8; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, hh, mm);
+      if (s.days.includes(d.getDay()) && d > now) return d;
+    }
+    return null;
+  }
+
+  function renderHeader() {
+    const r = state.refresh;
+    const site = $('site');
+    site.replaceChildren();
+    if (r && safeUrl(r.site)) {
+      let host = r.site;
+      try { host = new URL(r.site).host; } catch (e) {}
+      site.append(h('span', { class: 'host' }, host));
+      if (trackedProjects().length) site.append(h('span', null, trackedProjects().join(', ')));
+    } else {
+      site.append(h('span', null, 'New tickets on your tracked projects'));
+    }
+    const ref = $('refreshed');
+    ref.replaceChildren();
+    if (r && r.at) {
+      const next = nextRun(normSchedule(r.schedule));
+      ref.append('Refreshed ' + dayTime(r.at) + ' · ' + ago(r.at) + (next ? ' · next ' + dayTime(next.toISOString()) : ''));
+    }
+  }
+
+  function renderSummary() {
+    const box = $('summary');
+    const r = state.refresh, tab = TABS.find((x) => x.id === state.active), t = state.tabs[tab.id];
+    if (!r || !t || !Array.isArray(t.rows)) { box.hidden = true; return; }
+    const rows = t.rows;
+    const total = typeof t.total === 'number' ? t.total : rows.length;
+    const carried = rows.filter((x) => x.carried).length;
+    const headline = {
+      new: [total === 1 ? ' new ticket since ' : ' new tickets since ', dayTime(r.since)],
+      recent: [total === 1 ? ' ticket updated since ' : ' tickets updated since ', dayTime(r.since)],
+      mine: [total === 1 ? ' open ticket assigned to you' : ' open tickets assigned to you'],
+    }[tab.id];
+    const byProject = {}, byCat = { todo: 0, progress: 0, done: 0 };
+    for (const row of rows) {
+      const p = String(row.key || '').split('-')[0];
+      if (p) byProject[p] = (byProject[p] || 0) + 1;
+      byCat[CATEGORY[row.statusCategory] || 'todo']++;
+    }
+    const count = (n, label) => h('span', null, h('b', null, String(n)), ' ' + label);
+    const parts = [];
+    if (tab.review && rows.length) {
+      parts.push(h('span', { class: 'group' }, count(toReview(t), 'to review'), carried ? count(carried, 'from earlier days') : null));
+    }
+    if (rows.length) {
+      if (total > rows.length - carried) parts.push(h('span', null, 'Of the ' + rows.length + ' shown:'));
+      parts.push(h('span', { class: 'group' }, Object.entries(byProject).sort().map(([p, n]) => count(n, p))));
+      parts.push(h('span', { class: 'group' }, count(byCat.todo, 'to do'), count(byCat.progress, 'in progress'), byCat.done ? count(byCat.done, 'done') : null));
+    }
+    box.replaceChildren(
+      h('div', { class: 'big' }, h('b', null, String(total)), ...headline),
+      h('div', { class: 'parts' }, parts)
+    );
+    box.hidden = false;
+  }
+
+  function renderTabs() {
+    const bar = $('tabs');
+    bar.replaceChildren(...TABS.map((tab) => {
+      const t = state.tabs[tab.id];
+      // Review tabs count what's left to review; My Tickets counts its tickets.
+      let count = null;
+      if (t && Array.isArray(t.rows)) {
+        const n = tab.review ? toReview(t) : (typeof t.total === 'number' ? t.total : t.rows.length);
+        count = h('span', { class: 'count' + (tab.review && n ? ' due' : ''), title: tab.review ? n + ' to review' : n + ' tickets' }, String(n));
+      }
+      const b = h('button', { class: 'tab', role: 'tab', id: 'tab-' + tab.id, type: 'button', 'aria-selected': String(state.active === tab.id), 'aria-controls': 'panel' },
+        tab.label, count);
+      b.addEventListener('click', () => { state.active = tab.id; render(); });
+      return b;
+    }));
+    $('panel').setAttribute('aria-labelledby', 'tab-' + state.active);
+  }
+
+  function note(title, ...body) { return h('div', { class: 'note' }, h('strong', null, title), ...body); }
+
+  function row(t, tab) {
+    const url = safeUrl(t.url);
+    const cat = CATEGORY[t.statusCategory] || 'todo';
+    const done = tab.review && isReviewed(t);
+    const keyCell = [url ? h('a', { href: url, target: '_blank', rel: 'noopener' }, t.key || '') : (t.key || '')];
+    if (tab.review && keyOk(t.key)) {
+      const box = h('input', { type: 'checkbox', id: 'rev-' + tab.id + '-' + t.key, 'aria-label': 'Reviewed ' + t.key });
+      box.checked = done;
+      box.disabled = marking.keys.has(t.key) || !!marking.all;
+      box.addEventListener('change', () => setReviewed(t, box.checked));
+      keyCell.unshift(h('label', { class: 'review', title: done ? 'Reviewed' : 'Not reviewed yet' }, box));
+    }
+    if (t.carried) keyCell.push(h('span', { class: 'chip', title: 'Not reviewed since it came in' }, 'from ' + dayName(t.seen)));
+    return h('tr', { class: done ? 'reviewed' : null },
+      h('td', { class: 'key' }, keyCell),
+      h('td', { class: 'sum' }, t.summary || ''),
+      h('td', { class: 'type' }, t.type || ''),
+      h('td', { class: 'status' }, h('span', { class: 'lz' + (cat === 'todo' ? '' : ' ' + cat), title: t.statusCategory || '' }, t.status || '')),
+      h('td', { class: 'who' }, t.assignee ? t.assignee : h('span', { class: 'unassigned' }, 'Unassigned')),
+      h('td', { class: 'when' }, dayTime(tab.id === 'new' ? t.created : t.updated))
+    );
+  }
+  // "Fri" within the last six days, else "Oct 30".
+  function dayName(iso) {
+    const d = toDate(iso);
+    if (!d) return 'earlier';
+    return Date.now() - d.getTime() < 6 * 86400000 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+
+  async function setReviewed(t, on) {
+    if (!state.db || !keyOk(t.key) || marking.keys.has(t.key)) return;
+    marking.keys.add(t.key);
+    render();
+    const ref = state.db.collection('reviews').doc(t.key);
+    try {
+      if (on) await ref.set({ reviewedAt: new Date().toISOString(), updated: t.updated || null });
+      else await ref.delete();
+    } catch (e) {
+      pull.msg = "Couldn't save the review mark for " + t.key + '. Try again.';
+    }
+    marking.keys.delete(t.key);
+    render();
+  }
+
+  async function markAllReviewed(tab, shownRows) {
+    if (!state.db || marking.all) return;
+    const todo = (shownRows || rowsOf(state.tabs[tab.id])).filter((r) => !isReviewed(r) && keyOk(r.key));
+    for (let i = 0; i < todo.length; i++) {
+      marking.all = 'Marking ' + (i + 1) + ' of ' + todo.length + '…';
+      render();
+      try {
+        await state.db.collection('reviews').doc(todo[i].key).set({ reviewedAt: new Date().toISOString(), updated: todo[i].updated || null });
+      } catch (e) {
+        pull.msg = "Couldn't mark them all. " + i + ' of ' + todo.length + ' were saved; try again.';
+        break;
+      }
+    }
+    marking.all = '';
+    render();
+  }
+
+  function renderPanel() {
+    const panel = $('panel');
+    const tab = TABS.find((x) => x.id === state.active);
+    const t = state.tabs[tab.id];
+    const r = state.refresh;
+    if (state.closed) return panel.replaceChildren(note(state.closed));
+    if (state.error) return panel.replaceChildren(note(state.error));
+    if (r === undefined || t === undefined) {
+      return panel.replaceChildren(note(state.slow ? "The dashboard can't be reached yet" : 'Loading…',
+        state.slow ? 'Check your connection; it will fill in once it loads.' : ''));
+    }
+    if (!r) return panel.replaceChildren(note('No refresh yet', 'Ask Claude to refresh your Jira dashboard.'));
+    if (!t || !Array.isArray(t.rows)) {
+      return panel.replaceChildren(note('Not filled yet', state.mcp ? 'This tab fills at the next refresh. Press Refresh to fill it now.' : 'This tab fills at the next refresh. Ask Claude to refresh.'));
+    }
+    const rows = t.rows;
+    const fresh = rows.filter((x) => !x.carried).length;
+    const total = typeof t.total === 'number' ? t.total : fresh;
+    const kids = [];
+    const used = usedFilter(t);
+    const filterText = (used.issueTypes.length ? ' · only ' + used.issueTypes.join(', ') : '') + (used.ignoreStatuses.length ? ' · hiding ' + used.ignoreStatuses.join(', ') : '');
+    if (!rows.length) {
+      kids.push(note(tab.id === 'mine' ? tab.empty : tab.empty + ' since ' + dayTime(r.since), filterText ? 'Filtered in Settings' + filterText + '.' : ''));
+    } else {
+      // The project view only narrows what's shown; the tab still holds every row.
+      const inRows = [...new Set(rows.map(projectOf).filter(Boolean))].sort();
+      let view = viewOf(tab.id);
+      if (view !== 'all' && !inRows.includes(view) && !trackedProjects().includes(view)) view = 'all';
+      const shownRows = view === 'all' ? rows : rows.filter((x) => projectOf(x) === view);
+      let picker = null;
+      if (inRows.length > 1 || view !== 'all') {
+        const sel = h('select', { id: 'view-' + tab.id, 'aria-label': 'Show project' },
+          h('option', { value: 'all' }, 'All projects'),
+          [...new Set(inRows.concat(view === 'all' ? [] : [view]))].sort().map((k) => h('option', { value: k }, k)));
+        sel.value = view;
+        sel.addEventListener('change', () => setView(tab.id, sel.value));
+        picker = h('label', { class: 'viewpick' }, sel);
+      }
+      const more = total > fresh ? h('span', { class: 'more' }, fresh + ' of ' + total + ' shown') : null;
+      const left = h('span', { class: 'actions' }, picker, h('span', null, 'Most recently updated first', filterText, view === 'all' ? '' : ' · ' + shownRows.length + ' of ' + rows.length + ' rows'));
+      const tools = [];
+      if (tab.review && shownRows.some((x) => !isReviewed(x))) {
+        const all = h('button', { type: 'button', class: 'btn', id: 'mark-all-' + tab.id }, view === 'all' ? 'Mark all reviewed' : 'Mark all ' + view + ' reviewed');
+        all.disabled = !!marking.all || !state.db;
+        all.addEventListener('click', () => markAllReviewed(tab, shownRows));
+        tools.push(all);
+      }
+      if (marking.all) tools.push(h('span', { class: 'msg', role: 'status' }, marking.all));
+      kids.push(h('div', { class: 'caption' }, left, h('span', { class: 'actions' }, ...tools, more)));
+      if (!shownRows.length) {
+        kids.push(note('No ' + view + ' tickets on this tab', 'Choose All projects to see the rest.'));
+      } else {
+        kids.push(h('div', { class: 'tablewrap' }, h('table', null,
+          h('thead', null, h('tr', null, ['Key', 'Summary', 'Type', 'Status', 'Assignee', tab.id === 'new' ? 'Created' : 'Updated'].map((c) => h('th', { scope: 'col' }, c)))),
+          h('tbody', null, shownRows.map((x) => row(x, tab)))
+        )));
+      }
+    }
+    // Older tabs kept the query inside a search link; newer ones keep it as text.
+    let jql = typeof t.jql === 'string' ? t.jql : '';
+    if (!jql && typeof t.searchUrl === 'string') { try { jql = new URL(t.searchUrl).searchParams.get('jql') || ''; } catch (e) {} }
+    if (jql) kids.push(h('div', { class: 'query' }, 'Query: ', h('code', null, jql)));
+    if (state.settings !== undefined && !sameFilter(savedFilter(tab.id), used) && !pull.running) {
+      kids.push(h('div', { class: 'query warn' }, "This tab's settings changed. " + (state.mcp ? 'Press Refresh to apply them.' : 'Ask Claude to refresh the dashboard to apply them.')));
+    }
+    panel.replaceChildren(...kids);
+  }
+
+  // A re-read is pending until types/main is newer than the request.
+  function rereadPending() {
+    const req = toDate(state.settings && state.settings.typesRequested);
+    const read = toDate(state.types && state.types.at);
+    return !!req && (!read || req > read);
+  }
+
+  function updateSettingsControls() {
+    const save = $('types-save'), clear = $('types-clear'), msg = $('types-msg');
+    if (save) save.disabled = !ui.dirty || ui.saving;
+    if (clear) clear.disabled = ui.saving || (!ui.draft.types.size && !ui.draft.statuses.size);
+    if (msg) msg.textContent = ui.saving ? 'Saving…' : ui.msg;
+    const read = $('types-read'), reread = $('types-reread');
+    const pending = rereadPending();
+    if (read) {
+      const at = state.types && state.types.at;
+      read.textContent = (at ? 'Types and statuses read from Jira ' + dayTime(at) + '.' : '') + (pending ? ' They will be re-read when the dashboard next refreshes.' : '');
+    }
+    if (reread) reread.disabled = pending || ui.requesting;
+  }
+  const draftFilter = () => ({ issueTypes: [...ui.draft.types].sort(), ignoreStatuses: [...ui.draft.statuses].sort() });
+  const markDirty = () => { ui.dirty = !sameFilter(draftFilter(), savedFilter(ui.settingsTab)); ui.msg = ''; updateSettingsControls(); };
+
+  async function requestReread() {
+    if (!state.db || ui.requesting) return;
+    if (state.mcp) {
+      ui.requesting = true;
+      updateSettingsControls();
+      await readTypes();
+      ui.requesting = false;
+      return render();
+    }
+    const ref = state.db.doc('settings/main');
+    const body = { typesRequested: new Date().toISOString() };
+    ui.requesting = true;
+    updateSettingsControls();
+    try {
+      await (state.settings ? ref.update(body) : ref.set(body));
+    } catch (e) {
+      ui.msg = e && e.code === 'invalid_argument' ? "Only the dashboard's owner and editors can change its settings." : "Couldn't ask for a re-read. Check your connection and try again.";
+    }
+    ui.requesting = false;
+    render();
+  }
+
+  function renderSettings() {
+    const box = $('settings');
+    if (!state.db || state.closed || state.error || state.settings === undefined || state.types === undefined || state.refresh === undefined) { box.hidden = true; return; }
+    box.hidden = false;
+    const tabId = ui.settingsTab;
+    const tab = TABS.find((x) => x.id === tabId);
+    const types = state.types && Array.isArray(state.types.types) ? state.types.types.filter((x) => x && typeof x.name === 'string') : [];
+    // Statuses: the tracked projects' list, plus any this tab's rows show (My Tickets spans other projects).
+    const statusMap = new Map();
+    for (const s of (state.types && Array.isArray(state.types.statuses) ? state.types.statuses : [])) if (s && typeof s.name === 'string') statusMap.set(s.name, s.category || 'To Do');
+    for (const x of rowsOf(state.tabs[tabId])) if (x.status && !statusMap.has(x.status)) statusMap.set(x.status, x.statusCategory || 'To Do');
+    const saved = savedFilter(tabId);
+    // A hidden status that no rows or project list show any more still appears, so it can be unticked.
+    for (const n of saved.ignoreStatuses) if (!statusMap.has(n)) statusMap.set(n, 'Other');
+    const key = JSON.stringify([tabId, types, [...statusMap], saved]);
+    if (ui.dirty || key === ui.key) return updateSettingsControls();
+    ui.key = key;
+    ui.draft = { types: new Set(saved.issueTypes), statuses: new Set(saved.ignoreStatuses) };
+    // A saved type the projects no longer list still shows, so it can be unticked.
+    const all = types.concat(saved.issueTypes.filter((n) => !types.some((x) => x.name === n)).map((name) => ({ name, subtask: false })));
+    const box2 = $('settings-types');
+    const picker = h('div', { class: 'theme tabpick', role: 'group', 'aria-label': 'Tab to set up' }, TABS.map((x) => {
+      const b = h('button', { type: 'button', id: 'set-tab-' + x.id, 'aria-pressed': String(x.id === tabId) }, x.label);
+      b.addEventListener('click', () => { ui.settingsTab = x.id; ui.dirty = false; ui.msg = ''; ui.key = ''; render(); });
+      return b;
+    }));
+    const intro = [
+      h('h2', null, 'Tab settings'),
+      picker,
+      h('p', null, 'Choose which ticket types ' + tab.label + ' includes (none chosen means every type) and which statuses it hides. ' + (state.mcp ? 'Saving also refreshes the dashboard.' : 'Changes apply when the dashboard next refreshes.')),
+    ];
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    const statusesIn = (cat) => [...statusMap].filter(([, c]) => c === cat).map(([n]) => n).sort((a, b) => a.localeCompare(b));
+    const save = h('button', { type: 'button', class: 'btn primary', id: 'types-save' }, 'Save');
+    const clear = h('button', { type: 'button', class: 'btn', id: 'types-clear' }, 'Clear all');
+    const reread = h('button', { type: 'button', class: 'btn', id: 'types-reread' }, 'Re-read types and statuses');
+    reread.addEventListener('click', requestReread);
+    save.addEventListener('click', saveTypes);
+    const sections = [];
+    if (all.length) {
+      const asItems = (list) => list.sort(byName).map((x) => ({ value: x.name, text: x.name }));
+      sections.push(multiSelect({
+        id: 'types-' + tabId, label: 'Ticket types to include', empty: 'Every type', chosen: ui.draft.types, onChange: markDirty,
+        groups: [{ label: 'Types', items: asItems(all.filter((x) => !x.subtask)) }, { label: 'Sub-tasks', items: asItems(all.filter((x) => x.subtask)) }].filter((g) => g.items.length),
+      }));
+    }
+    if (statusMap.size) {
+      sections.push(multiSelect({
+        id: 'status-' + tabId, label: 'Statuses to hide', empty: 'None hidden', chosen: ui.draft.statuses, onChange: markDirty,
+        groups: ['To Do', 'In Progress', 'Done', 'Other'].map((cat) => ({ label: cat, items: statusesIn(cat).map((n) => ({ value: n, text: n })) })).filter((g) => g.items.length),
+      }));
+    }
+    clear.addEventListener('click', () => {
+      ui.draft.types.clear();
+      ui.draft.statuses.clear();
+      sections.forEach((s) => s.refresh && s.refresh());
+      markDirty();
+    });
+    if (!sections.length) sections.push(h('p', null, 'Ticket types and statuses appear here after the next refresh.'));
+    box2.replaceChildren(...intro,
+      h('div', { class: 'actions' }, h('span', { class: 'msg', id: 'types-read' }), reread),
+      // Empty groups come back as null, which replaceChildren would print as text.
+      ...sections.filter(Boolean),
+      h('div', { class: 'actions' }, save, clear, h('span', { class: 'msg', id: 'types-msg', role: 'status' })));
+    updateSettingsControls();
+  }
+
+  async function saveTypes() {
+    if (!state.db || ui.saving) return;
+    const tabId = ui.settingsTab;
+    const filter = draftFilter();
+    // Nested objects merge on update, so saving one tab leaves the others alone.
+    const body = { tabs: { [tabId]: filter }, updatedAt: new Date().toISOString() };
+    const ref = state.db.doc('settings/main');
+    const write = () => (state.settings ? ref.update(body) : ref.set(body));
+    ui.saving = true;
+    updateSettingsControls();
+    try {
+      try { await write(); } catch (e) {
+        if (!e || e.code !== 'unavailable') throw e;
+        await new Promise((r) => setTimeout(r, 300 + Math.random() * 500));
+        await write();
+      }
+      ui.dirty = false;
+      ui.key = '';
+      if (state.mcp && state.refresh) {
+        ui.msg = 'Saved. Refreshing…';
+        ui.saving = false;
+        render();
+        refreshNow({ filters: { [tabId]: filter } });
+        return;
+      }
+      ui.msg = 'Saved. It applies once the dashboard refreshes: ask Claude to refresh it.';
+    } catch (e) {
+      ui.msg = e && e.code === 'invalid_argument' ? "Only the dashboard's owner and editors can change its settings." : "Couldn't save. Check your connection and try again.";
+    }
+    ui.saving = false;
+    render();
+  }
+
+  // ---- Refreshing from the page, through the viewer's Atlassian connector ----
+
+  // Same window as SKILL.md: from the refresh time on the previous refresh day, or the last refresh if older.
+  function windowStart(sched, lastAt) {
+    const [hh, mm] = sched.time.split(':').map(Number);
+    const now = new Date();
+    let start = null;
+    for (let i = 1; i <= 7 && !start; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, hh, mm);
+      if (sched.days.includes(d.getDay())) start = d;
+    }
+    if (!start) start = new Date(now.getTime() - 86400000);
+    const last = toDate(lastAt);
+    return last && last < start ? last : start;
+  }
+  const pad = (n) => String(n).padStart(2, '0');
+  const jqlDate = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  const quote = (s) => '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  // Jira writes offsets as -0400; add the colon so every browser parses them.
+  const isoFix = (s) => (typeof s === 'string' ? s.replace(/([+-]\d{2})(\d{2})$/, '$1:$2') : s);
+  const dataOf = (result) => { const p = result && result.payload; return p && p.data ? p.data : p || {}; };
+
+  function connectorMessage(e) {
+    switch (e && e.code) {
+      case 'server_not_connected': return 'Add the Atlassian connector in claude.ai Settings › Connectors, then try again.';
+      case 'needs_reauth': return 'Reconnect the Atlassian connector in claude.ai Settings › Connectors, then try again.';
+      case 'selection_required': return 'Choose which Atlassian connector to use when claude.ai asks, then try again.';
+      case 'not_in_manifest':
+      case 'approval_required':
+      case 'consent_required': return 'Refreshing from here needs your OK to use the Atlassian connector. Press Refresh and allow it, or ask Claude to refresh.';
+      case 'blocked_by_policy': return "Your organization doesn't allow this page to use the Atlassian connector. Ask Claude to refresh instead.";
+      case 'server_unavailable': return "Jira didn't answer. Try again in a minute.";
+      case 'tool_error': return 'Jira refused the request: ' + (e.message || 'no details') + '.';
+      case 'not_granted':
+      case 'capability_disabled':
+      case 'capability_removed': return "This view can't reach Jira. Ask Claude to refresh.";
+      default: return "Couldn't reach Jira (" + ((e && e.code) || 'unknown error') + '). Try again, or ask Claude to refresh.';
+    }
+  }
+
+  // Reads retry once when the error says it may help.
+  async function jira(tool, input) {
+    try {
+      return await state.mcp.callTool(JIRA, tool, input, { cache: false });
+    } catch (e) {
+      if (!e || !e.retryable) throw e;
+      await new Promise((r) => setTimeout(r, Math.min(e.retryAfterMs || 0, 5000) + 400 + Math.random() * 600));
+      return state.mcp.callTool(JIRA, tool, input, { cache: false });
+    }
+  }
+
+  // Reads the tracked projects' types and statuses, and the list of every project for Settings › Projects.
+  async function readTypes(only) {
+    const r = state.refresh;
+    const projects = only || trackedProjects();
+    if (!state.mcp || !r || !safeUrl(r.site) || !projects.length) return false;
+    try {
+      const merged = new Map(), statusMap = new Map();
+      for (const key of projects) {
+        const res = await jira('executeRead', { cloudId: r.site, name: 'listJiraProjectIssueTypesMetadata', inputs: { projectIdOrKey: key, maxResults: 100 } });
+        for (const t of dataOf(res).issueTypes || []) {
+          if (t && typeof t.name === 'string' && !merged.has(t.name)) merged.set(t.name, { name: t.name, subtask: !!t.subtask });
+        }
+        const st = await jira('executeRead', { cloudId: r.site, name: 'listJiraStatuses', inputs: { mode: 'project', projectKey: key } });
+        for (const s of dataOf(st).statuses || []) {
+          if (s && typeof s.name === 'string' && !statusMap.has(s.name)) statusMap.set(s.name, { name: s.name, category: CATEGORY_NAME[s.category] || 'To Do' });
+        }
+      }
+      const byName = (a, b) => a.name.localeCompare(b.name);
+      const types = [...merged.values()].sort(byName);
+      const statuses = [...statusMap.values()].sort(byName);
+      const all = [];
+      for (let startAt = 0; startAt < 1000; startAt += 100) {
+        const page = dataOf(await jira('executeRead', { cloudId: r.site, name: 'listJiraProjects', inputs: { maxResults: 100, startAt } }));
+        const vals = Array.isArray(page.values) ? page.values : [];
+        for (const p of vals) if (p && keyOk(p.key)) all.push({ key: p.key, name: String(p.name || '').trim() });
+        if (vals.length < 100) break;
+      }
+      const at = new Date().toISOString();
+      await state.db.doc('types/main').set({ types, statuses, projects, at });
+      if (all.length) await state.db.doc('lists/projects').set({ projects: all.sort((a, b) => a.key.localeCompare(b.key)), at });
+      ui.msg = 'Types and statuses read from Jira.';
+      return true;
+    } catch (e) {
+      ui.msg = e && e.code && !['invalid_argument', 'quota_exceeded', 'resource_exhausted', 'revoked'].includes(e.code) ? connectorMessage(e) : "Couldn't save the types. Try again.";
+      return false;
+    }
+  }
+
+  async function refreshNow(opts) {
+    const r = state.refresh;
+    const projects = (opts && opts.projects) || trackedProjects();
+    if (!state.mcp || pull.running || !r || !safeUrl(r.site) || !projects.length) return;
+    pull.running = true;
+    pull.msg = 'Refreshing…';
+    render();
+    try {
+      // New tracked projects bring their own types and statuses.
+      const read = typeList(state.types && state.types.projects);
+      if (!sameTypes(read, projects)) await readTypes(projects);
+      const sched = normSchedule(r.schedule) || DEFAULT_SCHEDULE;
+      const start = windowStart(sched, r.at);
+      const now = new Date();
+      const minutes = Math.max(1, Math.ceil((now - start) / 60000));
+      const f = {};
+      for (const tab of TABS) f[tab.id] = (opts && opts.filters && opts.filters[tab.id]) || savedFilter(tab.id);
+      const clause = (x) => (x.issueTypes.length ? ' AND issuetype in (' + x.issueTypes.map(quote).join(', ') + ')' : '')
+        + (x.ignoreStatuses.length ? ' AND status not in (' + x.ignoreStatuses.map(quote).join(', ') + ')' : '');
+      // Carried rows follow the tab's settings too, so a status hidden today drops its old rows.
+      const allowed = (x) => (row) => (!x.issueTypes.length || x.issueTypes.includes(row.type)) && !x.ignoreStatuses.includes(row.status);
+      const projectScope = 'project in (' + projects.join(', ') + ')';
+      const order = ' ORDER BY updated DESC';
+      const base = r.site.replace(/\/+$/, '');
+      const nowIso = now.toISOString();
+      const rel = '-' + minutes + 'm';
+      const abs = '"' + jqlDate(start) + '"';
+      // Each query is written once with a placeholder: relative minutes for the search, the absolute date for display.
+      const q = {
+        new: projectScope + clause(f.new) + ' AND created >= @',
+        recent: projectScope + clause(f.recent) + ' AND updated >= @ AND created < @',
+        mine: 'assignee = currentUser() AND statusCategory != Done' + clause(f.mine),
+      };
+      const shown = (id) => q[id].split('@').join(abs) + order;
+      const search = (id) => jira('searchJiraIssuesUsingJql', {
+        cloudId: r.site, jql: q[id].split('@').join(rel) + order, maxResults: CAP, searchResultMode: 'all',
+        fields: ['summary', 'issuetype', 'status', 'created', 'updated', 'assignee'],
+      }).then(dataOf);
+      const [dNew, dRecent, dMine] = await Promise.all([search('new'), search('recent'), search('mine')]);
+      // A ticket seen before keeps the time it first came in, for the "from Fri" chip.
+      const seenBefore = new Map();
+      for (const id of ['new', 'recent']) for (const x of rowsOf(state.tabs[id])) if (x.key && x.seen) seenBefore.set(x.key, x.seen);
+      const toRows = (data, keepSeen) => (Array.isArray(data.issues) ? data.issues : []).slice(0, CAP).map((it) => {
+        const f = it.fields || {};
+        const st = f.status || {};
+        const row = {
+          key: it.key, summary: f.summary || '', type: (f.issuetype && f.issuetype.name) || '',
+          status: st.name || '', statusCategory: (st.statusCategory && st.statusCategory.name) || '',
+          assignee: (f.assignee && f.assignee.displayName) || null,
+          created: isoFix(f.created), updated: isoFix(f.updated), url: base + '/browse/' + it.key,
+        };
+        if (keepSeen) row.seen = seenBefore.get(it.key) || nowIso;
+        return row;
+      });
+      const totalOf = (data, rows) => (typeof data.totalCount === 'number' ? data.totalCount : rows.length);
+      // Unreviewed rows from earlier windows stay on their tab, newest first, up to CARRY_CAP.
+      const carry = (prev, skip) => prev
+        .filter((row) => row && row.key && !skip.has(row.key) && !isReviewed(row))
+        .map((row) => ({ ...row, carried: true }))
+        .sort((a, b) => (toDate(b.seen) || 0) - (toDate(a.seen) || 0))
+        .slice(0, CARRY_CAP);
+      const freshNew = toRows(dNew, true);
+      const freshRecent = toRows(dRecent, true);
+      const recentByKey = new Map(freshRecent.map((x) => [x.key, x]));
+      // A carried New ticket updated in this window takes the fresher data and stays on New.
+      const carriedNew = carry(rowsOf(state.tabs.new), new Set(freshNew.map((x) => x.key)))
+        .map((x) => (recentByKey.has(x.key) ? { ...recentByKey.get(x.key), seen: x.seen, carried: true } : x))
+        .filter(allowed(f.new));
+      const newRows = freshNew.concat(carriedNew);
+      const onNew = new Set(newRows.map((x) => x.key));
+      const recentFresh = freshRecent.filter((x) => !onNew.has(x.key));
+      const carriedRecent = carry(rowsOf(state.tabs.recent), new Set([...onNew, ...recentFresh.map((x) => x.key)])).filter(allowed(f.recent));
+      const mineRows = toRows(dMine, false);
+      const meta = (id) => ({ jql: shown(id), issueTypes: f[id].issueTypes, ignoreStatuses: f[id].ignoreStatuses });
+      await state.db.doc('tabs/new').set({ rows: newRows, total: totalOf(dNew, freshNew), carried: carriedNew.length, ...meta('new') });
+      await state.db.doc('tabs/recent').set({ rows: recentFresh.concat(carriedRecent), total: totalOf(dRecent, freshRecent), carried: carriedRecent.length, ...meta('recent') });
+      await state.db.doc('tabs/mine').set({ rows: mineRows, total: totalOf(dMine, mineRows), ...meta('mine') });
+      await state.db.doc('refresh/main').update({ at: nowIso, since: start.toISOString(), projects });
+      pull.msg = '';
+      if (opts && opts.filters) ui.msg = 'Saved and refreshed.';
+      if (opts && opts.projects) ui.proj.msg = 'Saved and refreshed.';
+    } catch (e) {
+      pull.msg = e && ['invalid_argument', 'quota_exceeded', 'resource_exhausted', 'revoked', 'unavailable'].includes(e.code) && !e.server ? "Couldn't save the refreshed tickets. Try again." : connectorMessage(e);
+      if (opts && opts.filters) ui.msg = 'Saved, but the refresh failed.';
+      if (opts && opts.projects) ui.proj.msg = 'Saved, but the refresh failed.';
+    }
+    pull.running = false;
+    ui.key = '';
+    render();
+  }
+
+  function renderRefresh() {
+    const row = $('refresh-row');
+    const ok = !!state.mcp && !state.closed && !state.error && !!state.refresh;
+    row.hidden = !ok && !pull.msg;
+    $('refresh-now').hidden = !ok;
+    $('refresh-now').disabled = pull.running;
+    $('refresh-msg').textContent = pull.msg;
+  }
+
+  // ---- Refresh schedule ----
+
+  function updateScheduleControls() {
+    const applied = normSchedule(state.refresh && state.refresh.schedule);
+    const wanted = normSchedule(state.settings && state.settings.schedule);
+    const status = $('sched-status');
+    if (status) {
+      let text = applied ? 'Claude refreshes the dashboard ' + describeSchedule(applied) + '.' : 'No scheduled refresh is set up yet. Ask Claude to set one up.';
+      if (wanted && !sameSchedule(wanted, applied)) text += ' Your new schedule, ' + describeSchedule(wanted) + ', takes effect when you ask Claude to apply it.';
+      status.textContent = text;
+    }
+    const save = $('sched-save'), msg = $('sched-msg');
+    const draft = normSchedule({ days: [...ui.sched.days], time: ui.sched.time });
+    if (save) save.disabled = !ui.schedDirty || ui.schedSaving || !draft;
+    if (msg) msg.textContent = ui.schedSaving ? 'Saving…' : (ui.schedDirty && !draft ? 'Pick at least one day and a time.' : ui.schedMsg);
+  }
+
+  function renderSchedule() {
+    const box = $('settings-schedule');
+    const applied = normSchedule(state.refresh && state.refresh.schedule);
+    const wanted = normSchedule(state.settings && state.settings.schedule);
+    const key = JSON.stringify([applied, wanted]);
+    if (ui.schedDirty || key === ui.schedKey) return updateScheduleControls();
+    ui.schedKey = key;
+    const startFrom = wanted || applied || DEFAULT_SCHEDULE;
+    ui.sched = { days: new Set(startFrom.days), time: startFrom.time };
+    const changed = () => {
+      const draft = normSchedule({ days: [...ui.sched.days], time: ui.sched.time });
+      ui.schedDirty = !sameSchedule(draft, wanted || applied || DEFAULT_SCHEDULE) || !draft;
+      ui.schedMsg = '';
+      updateScheduleControls();
+    };
+    const dayChip = (d) => {
+      const input = h('input', { type: 'checkbox', id: 'day-' + d, value: String(d) });
+      input.checked = ui.sched.days.has(d);
+      input.addEventListener('change', () => { if (input.checked) ui.sched.days.add(d); else ui.sched.days.delete(d); changed(); });
+      return h('label', { for: 'day-' + d }, input, DAY_NAMES[d]);
+    };
+    const time = h('input', { type: 'time', id: 'sched-time', value: ui.sched.time, step: '300' });
+    time.addEventListener('input', () => { ui.sched.time = time.value; changed(); });
+    const save = h('button', { type: 'button', class: 'btn primary', id: 'sched-save' }, 'Save schedule');
+    save.addEventListener('click', saveSchedule);
+    box.replaceChildren(
+      h('h2', null, 'Refresh schedule'),
+      h('p', { id: 'sched-status' }),
+      h('div', { class: 'typegrid', role: 'group', 'aria-label': 'Days' }, WEEK.map(dayChip)),
+      h('label', { class: 'timefield', for: 'sched-time' }, 'At', time),
+      h('p', null, 'Scheduled refreshes run while the Claude desktop app is open; one missed while it was closed runs when the app opens.'),
+      h('div', { class: 'actions' }, save, h('span', { class: 'msg', id: 'sched-msg', role: 'status' })));
+    updateScheduleControls();
+  }
+
+  async function saveSchedule() {
+    if (!state.db || ui.schedSaving) return;
+    const schedule = normSchedule({ days: [...ui.sched.days], time: ui.sched.time });
+    if (!schedule) return updateScheduleControls();
+    const ref = state.db.doc('settings/main');
+    ui.schedSaving = true;
+    updateScheduleControls();
+    try {
+      await (state.settings ? ref.update({ schedule }) : ref.set({ schedule }));
+      ui.schedDirty = false;
+      ui.schedKey = '';
+      ui.schedMsg = 'Saved.';
+    } catch (e) {
+      ui.schedMsg = e && e.code === 'invalid_argument' ? "Only the dashboard's owner and editors can change its settings." : "Couldn't save. Check your connection and try again.";
+    }
+    ui.schedSaving = false;
+    render();
+  }
+
+  // ---- Multi-select: chosen items as removable chips, and a panel with a filter box and the options in aligned columns ----
+
+  const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  // groups: [{label, items: [{value, text, title}]}]; chosen is a Set the picker changes in place, calling onChange after.
+  function multiSelect({ id, label, empty, groups, chosen, onChange }) {
+    const textOf = new Map();
+    for (const g of groups) for (const it of g.items) textOf.set(it.value, it.text);
+    const chips = h('div', { class: 'chips', id: id + '-chosen' });
+    const filter = h('input', { type: 'search', id: id + '-filter', placeholder: 'Filter', 'aria-label': 'Filter ' + label.toLowerCase(), autocomplete: 'off' });
+    const list = h('div', { id: id + '-options' });
+    const panel = h('div', { class: 'optpanel', id: id + '-panel', hidden: true }, filter, list);
+    const toggle = h('button', { type: 'button', class: 'btn', id: id + '-toggle', 'aria-expanded': 'false', 'aria-controls': id + '-panel' }, 'Choose…');
+    function drawChips() {
+      const picked = [...chosen].sort((a, b) => a.localeCompare(b));
+      chips.replaceChildren(...(picked.length ? picked.map((v) => {
+        const b = h('button', { type: 'button', class: 'token', title: 'Remove', 'aria-label': 'Remove ' + (textOf.get(v) || v) }, textOf.get(v) || v, h('span', { 'aria-hidden': 'true' }, '×'));
+        b.addEventListener('click', () => { chosen.delete(v); changed(); });
+        return b;
+      }) : [h('span', { class: 'msg' }, empty)]));
+    }
+    function drawList() {
+      const q = filter.value.trim().toLowerCase();
+      const parts = groups.map((g) => {
+        const items = g.items.filter((it) => !q || it.text.toLowerCase().includes(q));
+        if (!items.length) return null;
+        return h('div', { class: 'optgroup' }, g.label ? h('div', { class: 'group-label' }, g.label) : null, h('div', { class: 'optgrid' }, items.map((it) => {
+          const input = h('input', { type: 'checkbox', id: id + '-' + slug(it.value), 'data-value': it.value });
+          input.checked = chosen.has(it.value);
+          input.addEventListener('change', () => { if (input.checked) chosen.add(it.value); else chosen.delete(it.value); changed(); });
+          return h('label', { for: input.id, title: it.title || it.text }, input, h('span', null, it.text));
+        })));
+      }).filter(Boolean);
+      list.replaceChildren(...(parts.length ? parts : [h('p', { class: 'msg' }, 'Nothing matches.')]));
+    }
+    // Ticks change in place, so the checkbox just clicked keeps focus.
+    function sync() { list.querySelectorAll('input[type="checkbox"]').forEach((i) => { i.checked = chosen.has(i.dataset.value); }); }
+    function changed() { drawChips(); sync(); onChange(); }
+    toggle.addEventListener('click', () => {
+      const open = panel.hidden;
+      panel.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.textContent = open ? 'Done' : 'Choose…';
+      if (open) filter.focus();
+    });
+    filter.addEventListener('input', drawList);
+    drawChips();
+    drawList();
+    const el = h('div', { class: 'multi' }, h('div', { class: 'multi-head' }, h('h3', { class: 'group-label' }, label), toggle), chips, panel);
+    el.refresh = () => { drawChips(); sync(); };
+    return el;
+  }
+
+  // ---- Projects to search ----
+
+  function updateProjectControls() {
+    const save = $('proj-save'), msg = $('proj-msg'), load = $('proj-load');
+    if (save) save.disabled = !ui.proj.dirty || ui.proj.saving || !ui.proj.draft.size || pull.running;
+    if (msg) msg.textContent = ui.proj.saving ? 'Saving…' : (ui.proj.dirty && !ui.proj.draft.size ? 'Pick at least one project.' : ui.proj.msg);
+    if (load) load.disabled = ui.requesting || !state.mcp;
+  }
+
+  function renderProjects() {
+    const box = $('settings-projects');
+    const list = state.lists && Array.isArray(state.lists.projects) ? state.lists.projects.filter((p) => p && keyOk(p.key)) : [];
+    const current = trackedProjects();
+    const key = JSON.stringify([list, current]);
+    if (ui.proj.dirty || key === ui.proj.key) return updateProjectControls();
+    ui.proj.key = key;
+    ui.proj.draft = new Set(current);
+    // A tracked project the list doesn't show (not read yet, or no longer visible) still appears, so it can be unticked.
+    const all = list.concat(current.filter((k) => !list.some((p) => p.key === k)).map((k) => ({ key: k, name: '' })));
+    const picker = multiSelect({
+      id: 'proj', label: 'Projects to search', empty: 'Pick at least one project.', chosen: ui.proj.draft,
+      groups: [{ label: '', items: all.map((p) => ({ value: p.key, text: p.key + (p.name ? ' · ' + p.name : ''), title: p.name || p.key })) }],
+      onChange: () => { ui.proj.dirty = !sameTypes([...ui.proj.draft], trackedProjects()); ui.proj.msg = ''; updateProjectControls(); },
+    });
+    const save = h('button', { type: 'button', class: 'btn primary', id: 'proj-save' }, 'Save projects');
+    save.addEventListener('click', saveProjects);
+    let load = null;
+    if (!list.length) {
+      load = h('button', { type: 'button', class: 'btn', id: 'proj-load' }, 'Load the project list');
+      load.addEventListener('click', requestReread);
+    }
+    box.replaceChildren(...[
+      h('h2', null, 'Projects'),
+      h('p', null, 'New Tickets and Recent search these projects; My Tickets covers every project. ' + (state.mcp ? 'Saving also refreshes the dashboard.' : 'Changes apply when the dashboard next refreshes.')),
+      list.length ? null : h('div', { class: 'actions' }, h('span', { class: 'msg' }, 'Only the tracked projects show until the project list is read from Jira.'), load),
+      picker,
+      h('div', { class: 'actions' }, save, h('span', { class: 'msg', id: 'proj-msg', role: 'status' })),
+    ].filter(Boolean));
+    updateProjectControls();
+  }
+
+  async function saveProjects() {
+    if (!state.db || ui.proj.saving || !ui.proj.draft.size) return;
+    const projects = [...ui.proj.draft].sort();
+    const ref = state.db.doc('settings/main');
+    ui.proj.saving = true;
+    updateProjectControls();
+    try {
+      await (state.settings ? ref.update({ projects }) : ref.set({ projects }));
+      ui.proj.dirty = false;
+      ui.proj.key = '';
+      ui.proj.saving = false;
+      if (state.mcp && state.refresh) {
+        ui.proj.msg = 'Saved. Refreshing…';
+        render();
+        return refreshNow({ projects });
+      }
+      ui.proj.msg = 'Saved. It applies once the dashboard refreshes: ask Claude to refresh it.';
+    } catch (e) {
+      ui.proj.saving = false;
+      ui.proj.msg = e && e.code === 'invalid_argument' ? "Only the dashboard's owner and editors can change its settings." : "Couldn't save. Check your connection and try again.";
+    }
+    render();
+  }
+
+  function render() {
+    renderHeader(); renderRefresh(); renderSummary(); renderTabs(); renderPanel(); renderSettings();
+    if (!$('settings').hidden) { renderSchedule(); renderProjects(); }
+  }
+
+  async function boot() {
+    render();
+    const claude = window.claude;
+    if (!claude || typeof claude.use !== 'function') {
+      state.closed = 'Open this dashboard on claude.ai to see your tickets.';
+      return render();
+    }
+    const timer = setTimeout(() => { state.slow = true; render(); }, 10000);
+    const db = await claude.use('db');
+    if (!db) {
+      clearTimeout(timer);
+      state.closed = 'Sign in to claude.ai to see your tickets.';
+      return render();
+    }
+    const user = await claude.use('user');
+    if (user) {
+      let canEdit = null;
+      try { canEdit = await user.canEdit(); } catch (e) { canEdit = null; }
+      if (canEdit === false) {
+        clearTimeout(timer);
+        state.closed = 'This dashboard is private to its owner.';
+        return render();
+      }
+    }
+    const lost = (e) => {
+      clearTimeout(timer);
+      state.slow = false;
+      state.error = e && e.code === 'revoked' ? 'Access to this dashboard changed. Reload the page to continue.' : "The dashboard can't be loaded right now. Reload the page to try again.";
+      render();
+    };
+    const pending = new Set(['refresh/main', ...TABS.map((t) => t.doc)]);
+    const settle = (path, meta) => {
+      if (!meta.fromCache) pending.delete(path);
+      if (!pending.size) { clearTimeout(timer); state.slow = false; }
+    };
+    db.doc('refresh/main').onSnapshot((snap) => {
+      state.refresh = snap.exists ? snap.data() : null;
+      settle('refresh/main', snap.metadata);
+      render();
+    }, lost);
+    state.db = db;
+    // The connector is optional: without it the page still shows rows, and Claude refreshes them.
+    try { state.mcp = await claude.use('mcp'); } catch (e) { state.mcp = null; }
+    $('refresh-now').addEventListener('click', () => refreshNow());
+    // Settings are optional: if they can't load, the form stays hidden and refreshes include every type.
+    db.doc('settings/main').onSnapshot((snap) => {
+      state.settings = snap.exists ? snap.data() : null;
+      render();
+    }, () => {});
+    db.doc('types/main').onSnapshot((snap) => {
+      state.types = snap.exists ? snap.data() : null;
+      render();
+    }, () => {});
+    // The project list is optional: without it, Settings › Projects shows only the tracked ones.
+    db.doc('lists/projects').onSnapshot((snap) => {
+      state.lists = snap.exists ? snap.data() : null;
+      render();
+    }, () => {});
+    // Review marks are optional: if they can't load, every row reads as not reviewed.
+    db.collection('reviews').onSnapshot((snap) => {
+      state.reviews = Object.fromEntries(snap.docs.map((d) => [d.id, d.data()]));
+      render();
+    }, () => {});
+    for (const tab of TABS) {
+      db.doc(tab.doc).onSnapshot((snap) => {
+        state.tabs[tab.id] = snap.exists ? snap.data() : null;
+        settle(tab.doc, snap.metadata);
+        render();
+      }, lost);
+    }
+  }
+
+  // Keep "2 h ago" and recent-day labels current.
+  setInterval(() => { if (state.refresh) render(); }, 60000);
+  boot();
+})();
+</script>
