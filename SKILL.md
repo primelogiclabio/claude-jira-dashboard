@@ -128,7 +128,7 @@ There's no need to refresh after a review change; the page shows it at once.
 
 ## Flagging for discussion
 
-The page's flag button next to each row's key, on every tab, sets or deletes `flags/<KEY>`. The **Flagged** tab lists the flags, most recently flagged first, with each note under its summary and **Add note** or **Edit note** to change it. In chat:
+The page's flag button next to each row's key, on every tab, sets or deletes `flags/<KEY>`. Flagging opens a note box under the row's summary right away, for why it's flagged; **Skip** or Esc keeps the flag without a note. A note shows under its ticket's summary on every tab. The **Flagged** tab lists the flags, most recently flagged first, with **Add note** or **Edit note** to change each one. In chat:
 - "Flag OPS-142 for discussion", with or without a note ("…: ask who owns it"): take its row from a tab, else read the ticket with the connector's `getJiraIssue` (`cloudId` the Jira root URL) and build the row as a refresh would. `set` `flags/OPS-142` with `flaggedAt` (now), `note` (or `""`) and `row`. If it's already flagged, change only its note.
 - "Note on OPS-142: …" or "change the note": `update` `flags/OPS-142` with `note` and its `if_version`. Keep a note to 200 characters.
 - "Unflag OPS-142": `delete` it; its note goes with it.
@@ -167,8 +167,8 @@ The page shows:
 - **Summary**, for the tab shown: how many tickets ("6 new tickets since Fri 8:00", "4 tickets updated since Fri 8:00", "12 open tickets assigned to you", "3 tickets flagged for discussion"), how many to review and from earlier days, and the split by project and by status category.
 - **Rows**, most recently updated first, carried ones after:
   - on New Tickets and Recent, a **Reviewed** checkbox; reviewed rows are dimmed, and carried ones have a "from Fri" chip
-  - key, linked to the ticket, then a flag button, filled when the ticket is flagged, with the note in its tooltip
-  - summary
+  - key, linked to the ticket, then a flag button, filled when the ticket is flagged, with the note in its tooltip. Flagging opens a note box under the summary ("Why flag it? (optional)"), with Save and Skip.
+  - summary, and a flagged ticket's note under it, with **Edit note**
   - type
   - status, coloured by its category: grey for To Do, blue for In Progress, green for Done
   - assignee, or "Unassigned"

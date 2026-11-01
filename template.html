@@ -358,7 +358,8 @@ td.when { font-variant-numeric: tabular-nums; }
   const pull = { running: false, msg: '' };
   const marking = { keys: new Set(), all: '', flags: new Set() };
   // The note being edited on the Flagged tab: its ticket key and the unsaved text.
-  const noteEdit = { key: '', draft: '', saving: false, focus: false };
+  // fresh: the box opened right after flagging, so its way out is Skip rather than Cancel.
+  const noteEdit = { key: '', draft: '', saving: false, focus: false, fresh: false };
   // The settings form keeps its own draft so live updates never undo unsaved ticks.
   const ui = { views: {}, proj: { draft: new Set(), dirty: false, saving: false, msg: '', key: '' }, settingsTab: 'new', draft: { types: new Set(), statuses: new Set() }, dirty: false, saving: false, requesting: false, msg: '', key: '',
     sched: { days: new Set(), time: '' }, schedDirty: false, schedSaving: false, schedMsg: '', schedKey: '' };
@@ -594,7 +595,7 @@ td.when { font-variant-numeric: tabular-nums; }
     if (tab.flags && t.stale) keyCell.push(h('span', { class: 'chip', title: 'On no tab now: shown as it was when flagged' }, 'as of ' + dayName(t.flaggedAt)));
     return h('tr', { class: done ? 'reviewed' : null },
       h('td', { class: 'key' }, keyCell),
-      h('td', { class: 'sum' }, t.summary || '', tab.flags ? noteLine(t) : null),
+      h('td', { class: 'sum' }, t.summary || '', keyOk(t.key) ? noteLine(t, tab) : null),
       h('td', { class: 'type' }, t.type || ''),
       h('td', { class: 'status' }, h('span', { class: 'lz' + (cat === 'todo' ? '' : ' ' + cat), title: t.statusCategory || '' }, t.status || '')),
       h('td', { class: 'who' }, t.assignee ? t.assignee : h('span', { class: 'unassigned' }, 'Unassigned')),
@@ -623,10 +624,11 @@ td.when { font-variant-numeric: tabular-nums; }
     b.addEventListener('click', () => toggleFlag(t, !flag));
     return b;
   }
-  // On the Flagged tab: the note under the summary, or its editor while it's being changed.
-  function noteLine(t) {
+  // Under a flagged ticket's summary: its note, or the note box while it's being written.
+  // The box opens on any tab right after flagging; Add note shows only on the Flagged tab.
+  function noteLine(t, tab) {
     if (noteEdit.key === t.key) {
-      const input = h('input', { type: 'text', id: 'note-edit', maxlength: String(NOTE_MAX), 'aria-label': 'Note on ' + t.key, placeholder: 'What to raise about it' });
+      const input = h('input', { type: 'text', id: 'note-edit', maxlength: String(NOTE_MAX), 'aria-label': 'Note on ' + t.key, placeholder: noteEdit.fresh ? 'Why flag it? (optional)' : 'Why it’s flagged' });
       input.value = noteEdit.draft;
       input.disabled = noteEdit.saving;
       input.addEventListener('input', () => { noteEdit.draft = input.value; });
@@ -637,15 +639,19 @@ td.when { font-variant-numeric: tabular-nums; }
       const save = h('button', { type: 'button', class: 'btn primary', id: 'note-save' }, noteEdit.saving ? 'Saving…' : 'Save');
       save.disabled = noteEdit.saving;
       save.addEventListener('click', () => saveNote(t.key));
-      const cancel = h('button', { type: 'button', class: 'btn', id: 'note-cancel' }, 'Cancel');
+      // Right after flagging, the way out is Skip: the flag stays, without a note.
+      const cancel = h('button', { type: 'button', class: 'btn', id: 'note-cancel' }, noteEdit.fresh ? 'Skip' : 'Cancel');
       cancel.disabled = noteEdit.saving;
       cancel.addEventListener('click', cancelNote);
       return h('div', { class: 'noteedit' }, input, save, cancel);
     }
-    const edit = h('button', { type: 'button', class: 'linkbtn', id: 'note-' + t.key }, t.note ? 'Edit note' : 'Add note');
+    const flag = state.flags[t.key];
+    const text = flag && typeof flag.note === 'string' ? flag.note : '';
+    if (!flag || (!text && !tab.flags)) return null;
+    const edit = h('button', { type: 'button', class: 'linkbtn', id: 'note-' + t.key }, text ? 'Edit note' : 'Add note');
     edit.disabled = !state.db || !!noteEdit.saving;
     edit.addEventListener('click', () => startNote(t));
-    return h('div', { class: 'noteline' }, t.note ? h('span', { class: 'text' }, t.note) : null, edit);
+    return h('div', { class: 'noteline' }, text ? h('span', { class: 'text' }, text) : null, edit);
   }
   // "Fri" within the last six days, else "Oct 30".
   function dayName(iso) {
@@ -676,8 +682,15 @@ td.when { font-variant-numeric: tabular-nums; }
     render();
     const ref = state.db.collection('flags').doc(t.key);
     try {
-      if (on) await ref.set({ flaggedAt: new Date().toISOString(), note: '', row: rowCopy(t) });
-      else await ref.delete();
+      if (on) {
+        const flag = { flaggedAt: new Date().toISOString(), note: '', row: rowCopy(t) };
+        await ref.set(flag);
+        // Show the flag before the live update lands, and offer the note box straight away.
+        state.flags = { ...state.flags, [t.key]: flag };
+        Object.assign(noteEdit, { key: t.key, draft: '', fresh: true, focus: true });
+      } else {
+        await ref.delete();
+      }
     } catch (e) {
       pull.msg = "Couldn't save the flag on " + t.key + '. Try again.';
     }
@@ -686,14 +699,12 @@ td.when { font-variant-numeric: tabular-nums; }
   }
 
   function startNote(t) {
-    noteEdit.key = t.key;
-    noteEdit.draft = t.note || '';
-    noteEdit.focus = true;
+    const flag = state.flags[t.key];
+    Object.assign(noteEdit, { key: t.key, draft: (flag && typeof flag.note === 'string' && flag.note) || '', fresh: false, focus: true });
     render();
   }
   function cancelNote() {
-    noteEdit.key = '';
-    noteEdit.draft = '';
+    Object.assign(noteEdit, { key: '', draft: '', fresh: false });
     render();
   }
   async function saveNote(key) {
@@ -702,8 +713,7 @@ td.when { font-variant-numeric: tabular-nums; }
     render();
     try {
       await state.db.collection('flags').doc(key).update({ note: noteEdit.draft.trim().slice(0, NOTE_MAX) });
-      noteEdit.key = '';
-      noteEdit.draft = '';
+      Object.assign(noteEdit, { key: '', draft: '', fresh: false });
     } catch (e) {
       pull.msg = "Couldn't save the note on " + key + '. Try again.';
       noteEdit.focus = true;

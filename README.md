@@ -39,8 +39,9 @@ updates it again. The tab badges count what's left to review, and
 ### Flagging for discussion
 
 Click the flag next to a ticket's key, on any tab, to keep it on **Flagged**
-for bringing up with others, and add a short note there on what to raise. A
-flag stays until you unflag it, even after the ticket leaves the other tabs;
+for bringing up with others. A note box opens right away so you can say why
+(or press **Skip**), and the note shows under the ticket wherever it appears.
+A flag stays until you unflag it, even after the ticket leaves the other tabs;
 it then shows as it was when you flagged it, with an "as of" chip. Flags live
 only in the dashboard, never in Jira.
 
