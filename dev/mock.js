@@ -94,7 +94,14 @@
       if (tool === 'executeRead') return { payload: { data: { issueTypes: [{ name: 'Bug', subtask: false }, { name: 'Task', subtask: false }] } } };
       const q = input.jql;
       let list;
-      if (q.includes('currentUser()')) list = mineRows.concat([mk('APP-280', 'Clarify the empty state on the reports page', 'Task', 'To Do', 'To Do', 'You', 700, 1)]);
+      // Re-reads by key answer from how the tickets look now: APP-350 has been paused and OPS-17 started; unknown keys are skipped.
+      if (q.startsWith('key in')) {
+        if (window.__mcpFailKeyIn) throw { code: 'tool_error', message: 'mock key search failure', server };
+        const now = Object.fromEntries(newRows.concat(recentRows, mineRows).map((x) => [x.key, x]));
+        now['APP-350'] = { ...recentRows[0], status: 'Paused', statusCategory: 'To Do', updated: iso(1.5 * H) };
+        now['OPS-17'] = mk('OPS-17', 'Rotate the staging database credentials', 'Task', 'In Progress', 'In Progress', 'Mei Chen', 300, 4);
+        list = [...q.matchAll(/"([^"]+)"/g)].map((m) => now[m[1]]).filter(Boolean);
+      } else if (q.includes('currentUser()')) list = mineRows.concat([mk('APP-280', 'Clarify the empty state on the reports page', 'Task', 'To Do', 'To Do', 'You', 700, 1)]);
       // Recent: WEB-70 again, plus APP-401 (carried on New) updated since, and a fresh one.
       else if (q.includes('updated >=')) list = [recentRows[1], { ...newRows[3], status: 'In Progress', statusCategory: 'In Progress', updated: iso(0.5 * H) }, mk('APP-360', 'Archive old report exports', 'Task', 'Backlog', 'To Do', null, 200, 2)];
       else list = newRows.slice(0, 2).concat([mk('APP-413', 'Add a dark mode to the admin pages', 'Story', 'To Do', 'To Do', 'Sam Okafor', 0.4, 0.3)]);
