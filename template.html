@@ -349,10 +349,11 @@ td.when { font-variant-numeric: tabular-nums; }
   const SEARCH_TABS = TABS.filter((t) => t.doc);
   const NOTE_MAX = 200;
   const CATEGORY = { 'To Do': 'todo', 'In Progress': 'progress', 'Done': 'done' };
-  // Mirrors SKILL.md's Setup: the row cap per search, the carried-over cap per tab, and the schedule used before one is set.
+  // Mirrors SKILL.md: the row cap per search, the carried-over cap per tab, and, with no scheduled refresh,
+  // the window's start: midnight on the previous weekday.
   const CAP = 25;
   const CARRY_CAP = 50;
-  const DEFAULT_SCHEDULE = { days: [1, 2, 3, 4, 5], time: '08:00' };
+  const NO_SCHEDULE_WINDOW = { days: [1, 2, 3, 4, 5], time: '00:00' };
   const JIRA = 'Atlassian MCP';
   const state = { refresh: undefined, tabs: {}, settings: undefined, types: undefined, reviews: {}, flags: {}, db: null, mcp: null, active: 'new', slow: false, error: '', closed: '' };
   const pull = { running: false, msg: '' };
@@ -970,7 +971,8 @@ td.when { font-variant-numeric: tabular-nums; }
 
   // ---- Refreshing from the page, through the viewer's Atlassian connector ----
 
-  // Same window as SKILL.md: from the refresh time on the previous refresh day, or the last refresh if older.
+  // Same window as SKILL.md: from the schedule's time on the previous refresh day (midnight on the previous weekday
+  // when there's no schedule), or from the last refresh if that's older.
   function windowStart(sched, lastAt) {
     const [hh, mm] = sched.time.split(':').map(Number);
     const now = new Date();
@@ -1068,7 +1070,7 @@ td.when { font-variant-numeric: tabular-nums; }
       // New tracked projects bring their own types and statuses.
       const read = typeList(state.types && state.types.projects);
       if (!sameTypes(read, projects)) await readTypes(projects);
-      const sched = normSchedule(r.schedule) || DEFAULT_SCHEDULE;
+      const sched = normSchedule(r.schedule) || NO_SCHEDULE_WINDOW;
       const start = windowStart(sched, r.at);
       const now = new Date();
       const minutes = Math.max(1, Math.ceil((now - start) / 60000));
@@ -1160,18 +1162,34 @@ td.when { font-variant-numeric: tabular-nums; }
 
   // ---- Refresh schedule ----
 
+  // There's no scheduled refresh unless the user sets one up. settings/main.schedule holds the one they picked,
+  // or null once they've asked to turn it off; Claude applies either in a chat, since a page can't change scheduled tasks.
+  const offRequested = () => !!state.settings && state.settings.schedule === null;
+
   function updateScheduleControls() {
     const applied = normSchedule(state.refresh && state.refresh.schedule);
     const wanted = normSchedule(state.settings && state.settings.schedule);
+    const off = offRequested();
     const status = $('sched-status');
     if (status) {
-      let text = applied ? 'Claude refreshes the dashboard ' + describeSchedule(applied) + '.' : 'No scheduled refresh is set up yet. Ask Claude to set one up.';
-      if (wanted && !sameSchedule(wanted, applied)) text += ' Your new schedule, ' + describeSchedule(wanted) + ', takes effect when you ask Claude to apply it.';
+      let text;
+      if (applied && off) text = 'Claude refreshes the dashboard ' + describeSchedule(applied) + '. You asked to turn it off; that takes effect when you ask Claude to apply it.';
+      else if (applied) {
+        text = 'Claude refreshes the dashboard ' + describeSchedule(applied) + '.';
+        if (wanted && !sameSchedule(wanted, applied)) text += ' Your new schedule, ' + describeSchedule(wanted) + ', takes effect when you ask Claude to apply it.';
+      } else if (wanted) text = 'No scheduled refresh yet. Your schedule, ' + describeSchedule(wanted) + ', starts when you ask Claude to set it up.';
+      else text = 'No scheduled refresh. The dashboard refreshes when you press Refresh or ask Claude. To refresh on a schedule, pick days and a time, save, then ask Claude to set it up.';
       status.textContent = text;
     }
-    const save = $('sched-save'), msg = $('sched-msg');
+    const save = $('sched-save'), msg = $('sched-msg'), offBtn = $('sched-off'), keep = $('sched-keep');
     const draft = normSchedule({ days: [...ui.sched.days], time: ui.sched.time });
     if (save) save.disabled = !ui.schedDirty || ui.schedSaving || !draft;
+    if (offBtn) {
+      offBtn.hidden = off || !(applied || wanted);
+      offBtn.textContent = applied ? 'Turn off scheduled refresh' : 'Clear schedule';
+      offBtn.disabled = ui.schedSaving;
+    }
+    if (keep) { keep.hidden = !(off && applied); keep.disabled = ui.schedSaving; }
     if (msg) msg.textContent = ui.schedSaving ? 'Saving…' : (ui.schedDirty && !draft ? 'Pick at least one day and a time.' : ui.schedMsg);
   }
 
@@ -1179,14 +1197,16 @@ td.when { font-variant-numeric: tabular-nums; }
     const box = $('settings-schedule');
     const applied = normSchedule(state.refresh && state.refresh.schedule);
     const wanted = normSchedule(state.settings && state.settings.schedule);
-    const key = JSON.stringify([applied, wanted]);
+    const key = JSON.stringify([applied, wanted, offRequested()]);
     if (ui.schedDirty || key === ui.schedKey) return updateScheduleControls();
     ui.schedKey = key;
-    const startFrom = wanted || applied || DEFAULT_SCHEDULE;
-    ui.sched = { days: new Set(startFrom.days), time: startFrom.time };
+    // With nothing set, the form starts empty: no days ticked and no time.
+    const base = wanted || applied;
+    ui.sched = { days: new Set(base ? base.days : []), time: base ? base.time : '' };
     const changed = () => {
       const draft = normSchedule({ days: [...ui.sched.days], time: ui.sched.time });
-      ui.schedDirty = !sameSchedule(draft, wanted || applied || DEFAULT_SCHEDULE) || !draft;
+      const blank = !ui.sched.days.size && !ui.sched.time;
+      ui.schedDirty = base ? !draft || !sameSchedule(draft, base) : !blank;
       ui.schedMsg = '';
       updateScheduleControls();
     };
@@ -1200,20 +1220,29 @@ td.when { font-variant-numeric: tabular-nums; }
     time.addEventListener('input', () => { ui.sched.time = time.value; changed(); });
     const save = h('button', { type: 'button', class: 'btn primary', id: 'sched-save' }, 'Save schedule');
     save.addEventListener('click', saveSchedule);
+    const offBtn = h('button', { type: 'button', class: 'btn', id: 'sched-off' }, 'Turn off scheduled refresh');
+    offBtn.addEventListener('click', () => writeSchedule(null, applied ? 'Saved. Ask Claude to apply it.' : 'Cleared.'));
+    const keep = h('button', { type: 'button', class: 'btn', id: 'sched-keep' }, 'Keep it');
+    keep.addEventListener('click', () => writeSchedule(applied, 'Kept.'));
     box.replaceChildren(
       h('h2', null, 'Refresh schedule'),
       h('p', { id: 'sched-status' }),
       h('div', { class: 'typegrid', role: 'group', 'aria-label': 'Days' }, WEEK.map(dayChip)),
       h('label', { class: 'timefield', for: 'sched-time' }, 'At', time),
       h('p', null, 'Scheduled refreshes run while the Claude desktop app is open; one missed while it was closed runs when the app opens.'),
-      h('div', { class: 'actions' }, save, h('span', { class: 'msg', id: 'sched-msg', role: 'status' })));
+      h('div', { class: 'actions' }, save, offBtn, keep, h('span', { class: 'msg', id: 'sched-msg', role: 'status' })));
     updateScheduleControls();
   }
 
-  async function saveSchedule() {
-    if (!state.db || ui.schedSaving) return;
+  function saveSchedule() {
     const schedule = normSchedule({ days: [...ui.sched.days], time: ui.sched.time });
     if (!schedule) return updateScheduleControls();
+    return writeSchedule(schedule, 'Saved.');
+  }
+
+  // Saves the schedule the user wants, or null to turn the scheduled refresh off.
+  async function writeSchedule(schedule, done) {
+    if (!state.db || ui.schedSaving) return;
     const ref = state.db.doc('settings/main');
     ui.schedSaving = true;
     updateScheduleControls();
@@ -1221,7 +1250,7 @@ td.when { font-variant-numeric: tabular-nums; }
       await (state.settings ? ref.update({ schedule }) : ref.set({ schedule }));
       ui.schedDirty = false;
       ui.schedKey = '';
-      ui.schedMsg = 'Saved.';
+      ui.schedMsg = done;
     } catch (e) {
       ui.schedMsg = e && e.code === 'invalid_argument' ? "Only the dashboard's owner and editors can change its settings." : "Couldn't save. Check your connection and try again.";
     }

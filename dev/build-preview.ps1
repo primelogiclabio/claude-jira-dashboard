@@ -28,3 +28,4 @@ Build 'full-dark' 'full' 'dark'
 Build 'no-refresh' 'none' $null
 Build 'empty-dark' 'empty' 'dark'
 Build 'old-tabs' 'oldtabs' $null
+Build 'no-schedule' 'noschedule' $null
