@@ -113,6 +113,34 @@ td.key .review input { accent-color: var(--accent); width: 16px; height: 16px; m
   font-size: 0.72rem; font-weight: 600; color: var(--warn); border: 1px solid currentColor; white-space: nowrap;
 }
 tr.reviewed td:not(.key), tr.reviewed td.key a { opacity: 0.55; }
+td.key .flag {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  display: inline-flex; vertical-align: middle; margin-left: 6px; padding: 2px; border-radius: 4px;
+  color: var(--muted); opacity: 0.55;
+}
+td.key .flag:hover { opacity: 1; color: var(--ink); }
+td.key .flag.on { color: var(--accent); opacity: 1; }
+td.key .flag:disabled { cursor: default; opacity: 0.35; }
+td.key .flag:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
+.flag path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.flag.on path { fill: currentColor; }
+.noteline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 4px; font-size: 0.88rem; color: var(--muted); }
+.noteline .text { color: var(--ink); overflow-wrap: anywhere; }
+.noteline .text::before { content: "Note: "; color: var(--muted); }
+.linkbtn {
+  appearance: none; border: 0; background: none; padding: 0; cursor: pointer;
+  font: inherit; color: var(--accent); font-weight: 600;
+}
+.linkbtn:hover { text-decoration: underline; }
+.linkbtn:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+.linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.noteedit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px; }
+.noteedit input {
+  flex: 1 1 14rem; min-width: 0;
+  font: inherit; font-size: 0.9rem; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+}
+.noteedit input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .caption .actions { gap: 6px 12px; }
 .multi { display: grid; gap: 8px; }
 .multi-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -310,21 +338,27 @@ td.when { font-variant-numeric: tabular-nums; }
 
 <script>
 (() => {
-  // Each tab is one database document holding its rows. New and Recent carry a review mark per ticket.
+  // Each search tab is one database document holding its rows. New and Recent carry a review mark per ticket.
+  // Flagged has no document of its own: it lists the flags/<KEY> documents.
   const TABS = [
     { id: 'new', label: 'New Tickets', doc: 'tabs/new', review: true, empty: 'No new tickets' },
     { id: 'recent', label: 'Recent', doc: 'tabs/recent', review: true, empty: 'No tickets updated' },
     { id: 'mine', label: 'My Tickets', doc: 'tabs/mine', review: false, empty: 'No open tickets assigned to you' },
+    { id: 'flagged', label: 'Flagged', doc: null, review: false, flags: true },
   ];
+  const SEARCH_TABS = TABS.filter((t) => t.doc);
+  const NOTE_MAX = 200;
   const CATEGORY = { 'To Do': 'todo', 'In Progress': 'progress', 'Done': 'done' };
   // Mirrors SKILL.md's Setup: the row cap per search, the carried-over cap per tab, and the schedule used before one is set.
   const CAP = 25;
   const CARRY_CAP = 50;
   const DEFAULT_SCHEDULE = { days: [1, 2, 3, 4, 5], time: '08:00' };
   const JIRA = 'Atlassian MCP';
-  const state = { refresh: undefined, tabs: {}, settings: undefined, types: undefined, reviews: {}, db: null, mcp: null, active: 'new', slow: false, error: '', closed: '' };
+  const state = { refresh: undefined, tabs: {}, settings: undefined, types: undefined, reviews: {}, flags: {}, db: null, mcp: null, active: 'new', slow: false, error: '', closed: '' };
   const pull = { running: false, msg: '' };
-  const marking = { keys: new Set(), all: '' };
+  const marking = { keys: new Set(), all: '', flags: new Set() };
+  // The note being edited on the Flagged tab: its ticket key and the unsaved text.
+  const noteEdit = { key: '', draft: '', saving: false, focus: false };
   // The settings form keeps its own draft so live updates never undo unsaved ticks.
   const ui = { views: {}, proj: { draft: new Set(), dirty: false, saving: false, msg: '', key: '' }, settingsTab: 'new', draft: { types: new Set(), statuses: new Set() }, dirty: false, saving: false, requesting: false, msg: '', key: '',
     sched: { days: new Set(), time: '' }, schedDirty: false, schedSaving: false, schedMsg: '', schedKey: '' };
@@ -405,6 +439,30 @@ td.when { font-variant-numeric: tabular-nums; }
   const toReview = (t) => rowsOf(t).filter((r) => !isReviewed(r)).length;
   const keyOk = (k) => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,100}$/.test(k);
 
+  // A flag keeps a copy of the row from when it was set. The Flagged tab shows the freshest copy:
+  // the search tabs' row with the latest update when the ticket is on one, else the flag's own copy (stale: true).
+  const isFlagged = (row) => !!(row && row.key && state.flags[row.key]);
+  const ROW_FIELDS = ['key', 'summary', 'type', 'status', 'statusCategory', 'assignee', 'created', 'updated', 'url'];
+  const rowCopy = (row) => Object.fromEntries(ROW_FIELDS.map((k) => [k, row[k] == null ? null : row[k]]));
+  function flaggedRows() {
+    const latest = new Map();
+    for (const tab of SEARCH_TABS) for (const x of rowsOf(state.tabs[tab.id])) {
+      const had = latest.get(x.key);
+      if (x.key && (!had || (toDate(x.updated) || 0) > (toDate(had.updated) || 0))) latest.set(x.key, x);
+    }
+    return Object.entries(state.flags)
+      .filter(([key, f]) => keyOk(key) && f)
+      .map(([key, f]) => {
+        const own = f.row && typeof f.row === 'object' ? f.row : { key };
+        const on = latest.get(key);
+        const base = on && (!toDate(own.updated) || (toDate(on.updated) || 0) >= toDate(own.updated)) ? rowCopy(on) : { ...rowCopy(own), stale: true };
+        return { ...base, key, flaggedAt: f.flaggedAt || null, note: typeof f.note === 'string' ? f.note : '' };
+      })
+      .sort((a, b) => (toDate(b.flaggedAt) || 0) - (toDate(a.flaggedAt) || 0));
+  }
+  // The rows a tab shows: its document, or for Flagged the flags with their freshest rows.
+  const tabData = (tab) => (tab.flags ? { rows: flaggedRows() } : state.tabs[tab.id]);
+
   // A schedule is {days: [0-6, Sunday first as in cron], time: "HH:MM"}.
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const WEEK = [1, 2, 3, 4, 5, 6, 0];
@@ -464,7 +522,7 @@ td.when { font-variant-numeric: tabular-nums; }
 
   function renderSummary() {
     const box = $('summary');
-    const r = state.refresh, tab = TABS.find((x) => x.id === state.active), t = state.tabs[tab.id];
+    const r = state.refresh, tab = TABS.find((x) => x.id === state.active), t = tabData(tab);
     if (!r || !t || !Array.isArray(t.rows)) { box.hidden = true; return; }
     const rows = t.rows;
     const total = typeof t.total === 'number' ? t.total : rows.length;
@@ -473,6 +531,7 @@ td.when { font-variant-numeric: tabular-nums; }
       new: [total === 1 ? ' new ticket since ' : ' new tickets since ', dayTime(r.since)],
       recent: [total === 1 ? ' ticket updated since ' : ' tickets updated since ', dayTime(r.since)],
       mine: [total === 1 ? ' open ticket assigned to you' : ' open tickets assigned to you'],
+      flagged: [total === 1 ? ' ticket flagged for discussion' : ' tickets flagged for discussion'],
     }[tab.id];
     const byProject = {}, byCat = { todo: 0, progress: 0, done: 0 };
     for (const row of rows) {
@@ -500,16 +559,17 @@ td.when { font-variant-numeric: tabular-nums; }
   function renderTabs() {
     const bar = $('tabs');
     bar.replaceChildren(...TABS.map((tab) => {
-      const t = state.tabs[tab.id];
-      // Review tabs count what's left to review; My Tickets counts its tickets.
+      const t = tabData(tab);
+      // Review tabs count what's left to review; My Tickets counts its tickets; Flagged its flags, once there are any.
       let count = null;
-      if (t && Array.isArray(t.rows)) {
+      if (t && Array.isArray(t.rows) && !(tab.flags && !t.rows.length)) {
         const n = tab.review ? toReview(t) : (typeof t.total === 'number' ? t.total : t.rows.length);
-        count = h('span', { class: 'count' + (tab.review && n ? ' due' : ''), title: tab.review ? n + ' to review' : n + ' tickets' }, String(n));
+        count = h('span', { class: 'count' + (tab.review && n ? ' due' : ''), title: tab.review ? n + ' to review' : tab.flags ? n + ' flagged' : n + ' tickets' }, String(n));
       }
       const b = h('button', { class: 'tab', role: 'tab', id: 'tab-' + tab.id, type: 'button', 'aria-selected': String(state.active === tab.id), 'aria-controls': 'panel' },
         tab.label, count);
-      b.addEventListener('click', () => { state.active = tab.id; render(); });
+      // On a phone the tab bar scrolls sideways; keep the chosen tab in view.
+      b.addEventListener('click', () => { state.active = tab.id; render(); $('tab-' + tab.id).scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
       return b;
     }));
     $('panel').setAttribute('aria-labelledby', 'tab-' + state.active);
@@ -529,15 +589,63 @@ td.when { font-variant-numeric: tabular-nums; }
       box.addEventListener('change', () => setReviewed(t, box.checked));
       keyCell.unshift(h('label', { class: 'review', title: done ? 'Reviewed' : 'Not reviewed yet' }, box));
     }
+    if (keyOk(t.key)) keyCell.push(flagButton(t, tab));
     if (t.carried) keyCell.push(h('span', { class: 'chip', title: 'Not reviewed since it came in' }, 'from ' + dayName(t.seen)));
+    if (tab.flags && t.stale) keyCell.push(h('span', { class: 'chip', title: 'On no tab now: shown as it was when flagged' }, 'as of ' + dayName(t.flaggedAt)));
     return h('tr', { class: done ? 'reviewed' : null },
       h('td', { class: 'key' }, keyCell),
-      h('td', { class: 'sum' }, t.summary || ''),
+      h('td', { class: 'sum' }, t.summary || '', tab.flags ? noteLine(t) : null),
       h('td', { class: 'type' }, t.type || ''),
       h('td', { class: 'status' }, h('span', { class: 'lz' + (cat === 'todo' ? '' : ' ' + cat), title: t.statusCategory || '' }, t.status || '')),
       h('td', { class: 'who' }, t.assignee ? t.assignee : h('span', { class: 'unassigned' }, 'Unassigned')),
-      h('td', { class: 'when' }, dayTime(tab.id === 'new' ? t.created : t.updated))
+      h('td', { class: 'when' }, dayTime(tab.flags ? t.flaggedAt : tab.id === 'new' ? t.created : t.updated))
     );
+  }
+
+  function flagIcon() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    for (const [k, v] of Object.entries({ viewBox: '0 0 16 16', width: '14', height: '14', 'aria-hidden': 'true' })) svg.setAttribute(k, v);
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', 'M3.5 14.5V2 M3.5 2.5h8.5l-2 3 2 3H3.5Z');
+    svg.append(path);
+    return svg;
+  }
+  function flagButton(t, tab) {
+    const flag = state.flags[t.key];
+    const note = flag && typeof flag.note === 'string' ? flag.note : '';
+    const b = h('button', {
+      type: 'button', class: 'flag' + (flag ? ' on' : ''), id: 'flag-' + tab.id + '-' + t.key, 'aria-pressed': String(!!flag),
+      'aria-label': 'Flag ' + t.key + ' for discussion',
+      title: flag ? 'Flagged for discussion' + (note ? ': ' + note : '') + '. Click to unflag.' : 'Flag for discussion',
+    }, flagIcon());
+    b.disabled = marking.flags.has(t.key) || !state.db;
+    b.addEventListener('click', () => toggleFlag(t, !flag));
+    return b;
+  }
+  // On the Flagged tab: the note under the summary, or its editor while it's being changed.
+  function noteLine(t) {
+    if (noteEdit.key === t.key) {
+      const input = h('input', { type: 'text', id: 'note-edit', maxlength: String(NOTE_MAX), 'aria-label': 'Note on ' + t.key, placeholder: 'What to raise about it' });
+      input.value = noteEdit.draft;
+      input.disabled = noteEdit.saving;
+      input.addEventListener('input', () => { noteEdit.draft = input.value; });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); saveNote(t.key); }
+        if (e.key === 'Escape') { e.preventDefault(); cancelNote(); }
+      });
+      const save = h('button', { type: 'button', class: 'btn primary', id: 'note-save' }, noteEdit.saving ? 'Saving…' : 'Save');
+      save.disabled = noteEdit.saving;
+      save.addEventListener('click', () => saveNote(t.key));
+      const cancel = h('button', { type: 'button', class: 'btn', id: 'note-cancel' }, 'Cancel');
+      cancel.disabled = noteEdit.saving;
+      cancel.addEventListener('click', cancelNote);
+      return h('div', { class: 'noteedit' }, input, save, cancel);
+    }
+    const edit = h('button', { type: 'button', class: 'linkbtn', id: 'note-' + t.key }, t.note ? 'Edit note' : 'Add note');
+    edit.disabled = !state.db || !!noteEdit.saving;
+    edit.addEventListener('click', () => startNote(t));
+    return h('div', { class: 'noteline' }, t.note ? h('span', { class: 'text' }, t.note) : null, edit);
   }
   // "Fri" within the last six days, else "Oct 30".
   function dayName(iso) {
@@ -561,6 +669,62 @@ td.when { font-variant-numeric: tabular-nums; }
     render();
   }
 
+  // A flag is one flags/<KEY> document; unflagging deletes it, note and all.
+  async function toggleFlag(t, on) {
+    if (!state.db || !keyOk(t.key) || marking.flags.has(t.key)) return;
+    marking.flags.add(t.key);
+    render();
+    const ref = state.db.collection('flags').doc(t.key);
+    try {
+      if (on) await ref.set({ flaggedAt: new Date().toISOString(), note: '', row: rowCopy(t) });
+      else await ref.delete();
+    } catch (e) {
+      pull.msg = "Couldn't save the flag on " + t.key + '. Try again.';
+    }
+    marking.flags.delete(t.key);
+    render();
+  }
+
+  function startNote(t) {
+    noteEdit.key = t.key;
+    noteEdit.draft = t.note || '';
+    noteEdit.focus = true;
+    render();
+  }
+  function cancelNote() {
+    noteEdit.key = '';
+    noteEdit.draft = '';
+    render();
+  }
+  async function saveNote(key) {
+    if (!state.db || noteEdit.saving || !state.flags[key]) return;
+    noteEdit.saving = true;
+    render();
+    try {
+      await state.db.collection('flags').doc(key).update({ note: noteEdit.draft.trim().slice(0, NOTE_MAX) });
+      noteEdit.key = '';
+      noteEdit.draft = '';
+    } catch (e) {
+      pull.msg = "Couldn't save the note on " + key + '. Try again.';
+      noteEdit.focus = true;
+    }
+    noteEdit.saving = false;
+    render();
+  }
+  // Every live update redraws the panel, so the note editor gets its focus and cursor back afterwards.
+  function noteFocus() {
+    const el = document.activeElement;
+    return el && el.id === 'note-edit' ? [el.selectionStart, el.selectionEnd] : null;
+  }
+  function restoreNoteFocus(sel) {
+    const input = $('note-edit');
+    if (!input || input.disabled || (!sel && !noteEdit.focus)) return;
+    const end = input.value.length;
+    input.focus();
+    input.setSelectionRange(sel ? sel[0] : end, sel ? sel[1] : end);
+    noteEdit.focus = false;
+  }
+
   async function markAllReviewed(tab, shownRows) {
     if (!state.db || marking.all) return;
     const todo = (shownRows || rowsOf(state.tabs[tab.id])).filter((r) => !isReviewed(r) && keyOk(r.key));
@@ -581,8 +745,9 @@ td.when { font-variant-numeric: tabular-nums; }
   function renderPanel() {
     const panel = $('panel');
     const tab = TABS.find((x) => x.id === state.active);
-    const t = state.tabs[tab.id];
+    const t = tabData(tab);
     const r = state.refresh;
+    if (noteEdit.key && !state.flags[noteEdit.key]) { noteEdit.key = ''; noteEdit.draft = ''; }
     if (state.closed) return panel.replaceChildren(note(state.closed));
     if (state.error) return panel.replaceChildren(note(state.error));
     if (r === undefined || t === undefined) {
@@ -599,7 +764,9 @@ td.when { font-variant-numeric: tabular-nums; }
     const kids = [];
     const used = usedFilter(t);
     const filterText = (used.issueTypes.length ? ' · only ' + used.issueTypes.join(', ') : '') + (used.ignoreStatuses.length ? ' · hiding ' + used.ignoreStatuses.join(', ') : '');
-    if (!rows.length) {
+    if (!rows.length && tab.flags) {
+      kids.push(note('Nothing flagged for discussion', 'Flag a ticket on any tab to keep it here, with a note, until you unflag it.'));
+    } else if (!rows.length) {
       kids.push(note(tab.id === 'mine' ? tab.empty : tab.empty + ' since ' + dayTime(r.since), filterText ? 'Filtered in Settings' + filterText + '.' : ''));
     } else {
       // The project view only narrows what's shown; the tab still holds every row.
@@ -617,7 +784,7 @@ td.when { font-variant-numeric: tabular-nums; }
         picker = h('label', { class: 'viewpick' }, sel);
       }
       const more = total > fresh ? h('span', { class: 'more' }, fresh + ' of ' + total + ' shown') : null;
-      const left = h('span', { class: 'actions' }, picker, h('span', null, 'Most recently updated first', filterText, view === 'all' ? '' : ' · ' + shownRows.length + ' of ' + rows.length + ' rows'));
+      const left = h('span', { class: 'actions' }, picker, h('span', null, tab.flags ? 'Most recently flagged first' : 'Most recently updated first', filterText, view === 'all' ? '' : ' · ' + shownRows.length + ' of ' + rows.length + ' rows'));
       const tools = [];
       if (tab.review && shownRows.some((x) => !isReviewed(x))) {
         const all = h('button', { type: 'button', class: 'btn', id: 'mark-all-' + tab.id }, view === 'all' ? 'Mark all reviewed' : 'Mark all ' + view + ' reviewed');
@@ -631,7 +798,7 @@ td.when { font-variant-numeric: tabular-nums; }
         kids.push(note('No ' + view + ' tickets on this tab', 'Choose All projects to see the rest.'));
       } else {
         kids.push(h('div', { class: 'tablewrap' }, h('table', null,
-          h('thead', null, h('tr', null, ['Key', 'Summary', 'Type', 'Status', 'Assignee', tab.id === 'new' ? 'Created' : 'Updated'].map((c) => h('th', { scope: 'col' }, c)))),
+          h('thead', null, h('tr', null, ['Key', 'Summary', 'Type', 'Status', 'Assignee', tab.flags ? 'Flagged' : tab.id === 'new' ? 'Created' : 'Updated'].map((c) => h('th', { scope: 'col' }, c)))),
           h('tbody', null, shownRows.map((x) => row(x, tab)))
         )));
       }
@@ -640,7 +807,7 @@ td.when { font-variant-numeric: tabular-nums; }
     let jql = typeof t.jql === 'string' ? t.jql : '';
     if (!jql && typeof t.searchUrl === 'string') { try { jql = new URL(t.searchUrl).searchParams.get('jql') || ''; } catch (e) {} }
     if (jql) kids.push(h('div', { class: 'query' }, 'Query: ', h('code', null, jql)));
-    if (state.settings !== undefined && !sameFilter(savedFilter(tab.id), used) && !pull.running) {
+    if (!tab.flags && state.settings !== undefined && !sameFilter(savedFilter(tab.id), used) && !pull.running) {
       kids.push(h('div', { class: 'query warn' }, "This tab's settings changed. " + (state.mcp ? 'Press Refresh to apply them.' : 'Ask Claude to refresh the dashboard to apply them.')));
     }
     panel.replaceChildren(...kids);
@@ -696,7 +863,7 @@ td.when { font-variant-numeric: tabular-nums; }
     if (!state.db || state.closed || state.error || state.settings === undefined || state.types === undefined || state.refresh === undefined) { box.hidden = true; return; }
     box.hidden = false;
     const tabId = ui.settingsTab;
-    const tab = TABS.find((x) => x.id === tabId);
+    const tab = SEARCH_TABS.find((x) => x.id === tabId);
     const types = state.types && Array.isArray(state.types.types) ? state.types.types.filter((x) => x && typeof x.name === 'string') : [];
     // Statuses: the tracked projects' list, plus any this tab's rows show (My Tickets spans other projects).
     const statusMap = new Map();
@@ -712,7 +879,7 @@ td.when { font-variant-numeric: tabular-nums; }
     // A saved type the projects no longer list still shows, so it can be unticked.
     const all = types.concat(saved.issueTypes.filter((n) => !types.some((x) => x.name === n)).map((name) => ({ name, subtask: false })));
     const box2 = $('settings-types');
-    const picker = h('div', { class: 'theme tabpick', role: 'group', 'aria-label': 'Tab to set up' }, TABS.map((x) => {
+    const picker = h('div', { class: 'theme tabpick', role: 'group', 'aria-label': 'Tab to set up' }, SEARCH_TABS.map((x) => {
       const b = h('button', { type: 'button', id: 'set-tab-' + x.id, 'aria-pressed': String(x.id === tabId) }, x.label);
       b.addEventListener('click', () => { ui.settingsTab = x.id; ui.dirty = false; ui.msg = ''; ui.key = ''; render(); });
       return b;
@@ -896,7 +1063,7 @@ td.when { font-variant-numeric: tabular-nums; }
       const now = new Date();
       const minutes = Math.max(1, Math.ceil((now - start) / 60000));
       const f = {};
-      for (const tab of TABS) f[tab.id] = (opts && opts.filters && opts.filters[tab.id]) || savedFilter(tab.id);
+      for (const tab of SEARCH_TABS) f[tab.id] = (opts && opts.filters && opts.filters[tab.id]) || savedFilter(tab.id);
       const clause = (x) => (x.issueTypes.length ? ' AND issuetype in (' + x.issueTypes.map(quote).join(', ') + ')' : '')
         + (x.ignoreStatuses.length ? ' AND status not in (' + x.ignoreStatuses.map(quote).join(', ') + ')' : '');
       // Carried rows follow the tab's settings too, so a status hidden today drops its old rows.
@@ -1169,8 +1336,10 @@ td.when { font-variant-numeric: tabular-nums; }
   }
 
   function render() {
+    const sel = noteFocus();
     renderHeader(); renderRefresh(); renderSummary(); renderTabs(); renderPanel(); renderSettings();
     if (!$('settings').hidden) { renderSchedule(); renderProjects(); }
+    restoreNoteFocus(sel);
   }
 
   async function boot() {
@@ -1203,7 +1372,7 @@ td.when { font-variant-numeric: tabular-nums; }
       state.error = e && e.code === 'revoked' ? 'Access to this dashboard changed. Reload the page to continue.' : "The dashboard can't be loaded right now. Reload the page to try again.";
       render();
     };
-    const pending = new Set(['refresh/main', ...TABS.map((t) => t.doc)]);
+    const pending = new Set(['refresh/main', ...SEARCH_TABS.map((t) => t.doc)]);
     const settle = (path, meta) => {
       if (!meta.fromCache) pending.delete(path);
       if (!pending.size) { clearTimeout(timer); state.slow = false; }
@@ -1236,7 +1405,12 @@ td.when { font-variant-numeric: tabular-nums; }
       state.reviews = Object.fromEntries(snap.docs.map((d) => [d.id, d.data()]));
       render();
     }, () => {});
-    for (const tab of TABS) {
+    // Flags are optional too: if they can't load, nothing reads as flagged.
+    db.collection('flags').onSnapshot((snap) => {
+      state.flags = Object.fromEntries(snap.docs.map((d) => [d.id, d.data()]));
+      render();
+    }, () => {});
+    for (const tab of SEARCH_TABS) {
       db.doc(tab.doc).onSnapshot((snap) => {
         state.tabs[tab.id] = snap.exists ? snap.data() : null;
         settle(tab.doc, snap.metadata);

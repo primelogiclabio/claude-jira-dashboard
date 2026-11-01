@@ -22,9 +22,10 @@ The plan is in [`PLAN.md`](PLAN.md).
 - **Recent:** tickets on those projects updated in the same window, leaving
   out the ones already on New Tickets.
 - **My Tickets:** your open tickets, on any project.
+- **Flagged:** every ticket you've flagged for discussion, with its note.
 
-Each tab shows a summary (counts by project and status), the tickets most
-recently updated first, and the query it ran.
+Each search tab shows a summary (counts by project and status), the tickets
+most recently updated first, and the query it ran.
 
 ### Reviewing
 
@@ -34,6 +35,14 @@ A ticket you haven't reviewed stays on its tab after later refreshes, with a
 ticket drops off at the next refresh, and comes back on Recent if someone
 updates it again. The tab badges count what's left to review, and
 **Mark all reviewed** clears a tab.
+
+### Flagging for discussion
+
+Click the flag next to a ticket's key, on any tab, to keep it on **Flagged**
+for bringing up with others, and add a short note there on what to raise. A
+flag stays until you unflag it, even after the ticket leaves the other tabs;
+it then shows as it was when you flagged it, with an "as of" chip. Flags live
+only in the dashboard, never in Jira.
 
 ### Settings
 
