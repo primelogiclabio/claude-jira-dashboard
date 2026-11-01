@@ -40,9 +40,14 @@ updates it again. The tab badges count what's left to review, and
 Click the flag next to a ticket's key, on any tab, to keep it on **Flagged**
 for bringing up with others. A note box opens right away so you can say why
 (or press **Skip**), and the note shows under the ticket wherever it appears.
-A flag stays until you unflag it, even after the ticket leaves the other tabs;
-it then shows as it was when you flagged it, with an "as of" chip. Flags live
-only in the dashboard, never in Jira.
+A flag stays until you unflag it, even after the ticket leaves the other tabs.
+Each refresh re-reads every flagged ticket, so its status stays current, and
+**↻** on a Flagged row re-reads just that one. Flags live only in the
+dashboard, never in Jira.
+
+Refreshes also re-read the unreviewed tickets they carry over, so a carried
+ticket shows its current status, and drops off if it moves into a status the
+tab hides or Jira no longer returns it.
 
 ### Settings
 

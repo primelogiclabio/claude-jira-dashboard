@@ -113,16 +113,16 @@ td.key .review input { accent-color: var(--accent); width: 16px; height: 16px; m
   font-size: 0.72rem; font-weight: 600; color: var(--warn); border: 1px solid currentColor; white-space: nowrap;
 }
 tr.reviewed td:not(.key), tr.reviewed td.key a { opacity: 0.55; }
-td.key .flag {
+td.key .flag, td.key .recheck {
   appearance: none; border: 0; background: none; cursor: pointer;
   display: inline-flex; vertical-align: middle; margin-left: 6px; padding: 2px; border-radius: 4px;
   color: var(--muted); opacity: 0.55;
 }
-td.key .flag:hover { opacity: 1; color: var(--ink); }
+td.key .flag:hover, td.key .recheck:hover { opacity: 1; color: var(--ink); }
 td.key .flag.on { color: var(--accent); opacity: 1; }
-td.key .flag:disabled { cursor: default; opacity: 0.35; }
-td.key .flag:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
-.flag path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+td.key .flag:disabled, td.key .recheck:disabled { cursor: default; opacity: 0.35; }
+td.key .flag:focus-visible, td.key .recheck:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
+.flag path, .recheck path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .flag.on path { fill: currentColor; }
 .noteline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 4px; font-size: 0.88rem; color: var(--muted); }
 .noteline .text { color: var(--ink); overflow-wrap: anywhere; }
@@ -355,12 +355,14 @@ td.when { font-variant-numeric: tabular-nums; }
   const CARRY_CAP = 50;
   const NO_SCHEDULE_WINDOW = { days: [1, 2, 3, 4, 5], time: '00:00' };
   const JIRA = 'Atlassian MCP';
-  const state = { refresh: undefined, tabs: {}, settings: undefined, types: undefined, reviews: {}, flags: {}, db: null, mcp: null, active: 'new', slow: false, error: '', closed: '' };
+  const state = { refresh: undefined, tabs: {}, settings: undefined, types: undefined, reviews: {}, flags: {}, flagRows: null, db: null, mcp: null, active: 'new', slow: false, error: '', closed: '' };
   const pull = { running: false, msg: '' };
   const marking = { keys: new Set(), all: '', flags: new Set() };
   // The note being edited on the Flagged tab: its ticket key and the unsaved text.
   // fresh: the box opened right after flagging, so its way out is Skip rather than Cancel.
   const noteEdit = { key: '', draft: '', saving: false, focus: false, fresh: false };
+  // One-off re-reads of flagged tickets: the ones running, and the ones Jira didn't return.
+  const rechecking = { keys: new Set(), missing: new Set() };
   // The settings form keeps its own draft so live updates never undo unsaved ticks.
   const ui = { views: {}, proj: { draft: new Set(), dirty: false, saving: false, msg: '', key: '' }, settingsTab: 'new', draft: { types: new Set(), statuses: new Set() }, dirty: false, saving: false, requesting: false, msg: '', key: '',
     sched: { days: new Set(), time: '' }, schedDirty: false, schedSaving: false, schedMsg: '', schedKey: '' };
@@ -441,14 +443,14 @@ td.when { font-variant-numeric: tabular-nums; }
   const toReview = (t) => rowsOf(t).filter((r) => !isReviewed(r)).length;
   const keyOk = (k) => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,100}$/.test(k);
 
-  // A flag keeps a copy of the row from when it was set. The Flagged tab shows the freshest copy:
-  // the search tabs' row with the latest update when the ticket is on one, else the flag's own copy (stale: true).
+  // A flag keeps a copy of the row from when it was set. The Flagged tab shows the freshest copy: the search tabs'
+  // or tabs/flagged's row with the latest update (refreshes re-read flagged tickets), else the flag's own copy (stale: true).
   const isFlagged = (row) => !!(row && row.key && state.flags[row.key]);
   const ROW_FIELDS = ['key', 'summary', 'type', 'status', 'statusCategory', 'assignee', 'created', 'updated', 'url'];
   const rowCopy = (row) => Object.fromEntries(ROW_FIELDS.map((k) => [k, row[k] == null ? null : row[k]]));
   function flaggedRows() {
     const latest = new Map();
-    for (const tab of SEARCH_TABS) for (const x of rowsOf(state.tabs[tab.id])) {
+    for (const x of SEARCH_TABS.flatMap((tab) => rowsOf(state.tabs[tab.id])).concat(rowsOf(state.flagRows))) {
       const had = latest.get(x.key);
       if (x.key && (!had || (toDate(x.updated) || 0) > (toDate(had.updated) || 0))) latest.set(x.key, x);
     }
@@ -592,11 +594,13 @@ td.when { font-variant-numeric: tabular-nums; }
       keyCell.unshift(h('label', { class: 'review', title: done ? 'Reviewed' : 'Not reviewed yet' }, box));
     }
     if (keyOk(t.key)) keyCell.push(flagButton(t, tab));
+    if (tab.flags && state.mcp && keyOk(t.key)) keyCell.push(recheckButton(t));
     if (t.carried) keyCell.push(h('span', { class: 'chip', title: 'Not reviewed since it came in' }, 'from ' + dayName(t.seen)));
-    if (tab.flags && t.stale) keyCell.push(h('span', { class: 'chip', title: 'On no tab now: shown as it was when flagged' }, 'as of ' + dayName(t.flaggedAt)));
+    if (tab.flags && t.stale) keyCell.push(h('span', { class: 'chip', title: 'Not read from Jira since it was flagged: shown as it was then' }, 'as of ' + dayName(t.flaggedAt)));
     return h('tr', { class: done ? 'reviewed' : null },
       h('td', { class: 'key' }, keyCell),
-      h('td', { class: 'sum' }, t.summary || '', keyOk(t.key) ? noteLine(t, tab) : null),
+      h('td', { class: 'sum' }, t.summary || '', keyOk(t.key) ? noteLine(t, tab) : null,
+        tab.flags && rechecking.missing.has(t.key) ? h('div', { class: 'msg warn' }, "Jira didn't return " + t.key + ': it may be deleted or hidden from you.') : null),
       h('td', { class: 'type' }, t.type || ''),
       h('td', { class: 'status' }, h('span', { class: 'lz' + (cat === 'todo' ? '' : ' ' + cat), title: t.statusCategory || '' }, t.status || '')),
       h('td', { class: 'who' }, t.assignee ? t.assignee : h('span', { class: 'unassigned' }, 'Unassigned')),
@@ -623,6 +627,19 @@ td.when { font-variant-numeric: tabular-nums; }
     }, flagIcon());
     b.disabled = marking.flags.has(t.key) || !state.db;
     b.addEventListener('click', () => toggleFlag(t, !flag));
+    return b;
+  }
+  // On the Flagged tab: re-read just this ticket from Jira, one search instead of a whole refresh.
+  function recheckButton(t) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    for (const [k, v] of Object.entries({ viewBox: '0 0 16 16', width: '14', height: '14', 'aria-hidden': 'true' })) svg.setAttribute(k, v);
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', 'M13 8a5 5 0 1 1-1.6-3.7 M13 2.5v3h-3');
+    svg.append(path);
+    const b = h('button', { type: 'button', class: 'recheck', id: 'recheck-' + t.key, 'aria-label': 'Re-read ' + t.key + ' from Jira', title: 'Re-read from Jira' }, svg);
+    b.disabled = rechecking.keys.has(t.key) || !state.db;
+    b.addEventListener('click', () => recheckFlag(t.key));
     return b;
   }
   // Under a flagged ticket's summary: its note, or the note box while it's being written.
@@ -696,6 +713,29 @@ td.when { font-variant-numeric: tabular-nums; }
       pull.msg = "Couldn't save the flag on " + t.key + '. Try again.';
     }
     marking.flags.delete(t.key);
+    render();
+  }
+
+  // Puts one flagged ticket's current row into tabs/flagged, leaving the rest of the document as it is.
+  async function recheckFlag(key) {
+    const r = state.refresh;
+    if (!state.mcp || !state.db || !r || !safeUrl(r.site) || rechecking.keys.has(key)) return;
+    rechecking.keys.add(key);
+    rechecking.missing.delete(key);
+    render();
+    try {
+      const row = (await recheck(r.site, [key])).get(key);
+      if (!row) rechecking.missing.add(key);
+      else {
+        const rows = rowsOf(state.flagRows).filter((x) => x && x.key !== key).concat(rowCopy(row));
+        const ref = state.db.doc('tabs/flagged');
+        await (state.flagRows ? ref.update({ rows }) : ref.set({ rows }));
+        state.flagRows = { ...(state.flagRows || {}), rows };
+      }
+    } catch (e) {
+      pull.msg = e && ['invalid_argument', 'quota_exceeded', 'resource_exhausted', 'revoked', 'unavailable'].includes(e.code) && !e.server ? "Couldn't save " + key + '. Try again.' : connectorMessage(e);
+    }
+    rechecking.keys.delete(key);
     render();
   }
 
@@ -1021,6 +1061,32 @@ td.when { font-variant-numeric: tabular-nums; }
     }
   }
 
+  const FIELDS = ['summary', 'issuetype', 'status', 'created', 'updated', 'assignee'];
+  // One search result as a tab row (without seen or carried).
+  function issueRow(it, base) {
+    const f = it.fields || {};
+    const st = f.status || {};
+    return {
+      key: it.key, summary: f.summary || '', type: (f.issuetype && f.issuetype.name) || '',
+      status: st.name || '', statusCategory: (st.statusCategory && st.statusCategory.name) || '',
+      assignee: (f.assignee && f.assignee.displayName) || null,
+      created: isoFix(f.created), updated: isoFix(f.updated), url: base + '/browse/' + it.key,
+    };
+  }
+  // Re-reads tickets by key, 100 at a time, as rows by key. Jira skips keys that no longer exist instead of failing.
+  async function recheck(site, keys) {
+    const base = site.replace(/\/+$/, '');
+    const found = new Map();
+    for (let i = 0; i < keys.length; i += 100) {
+      const chunk = keys.slice(i, i + 100);
+      const data = dataOf(await jira('searchJiraIssuesUsingJql', {
+        cloudId: site, jql: 'key in (' + chunk.map(quote).join(', ') + ') ORDER BY updated DESC', maxResults: 100, fields: FIELDS,
+      }));
+      for (const it of Array.isArray(data.issues) ? data.issues : []) if (it && keyOk(it.key)) found.set(it.key, issueRow(it, base));
+    }
+    return found;
+  }
+
   // Reads the tracked projects' types and statuses, and the list of every project for Settings › Projects.
   async function readTypes(only) {
     const r = state.refresh;
@@ -1096,48 +1162,57 @@ td.when { font-variant-numeric: tabular-nums; }
       };
       const shown = (id) => q[id].split('@').join(abs) + order;
       const search = (id) => jira('searchJiraIssuesUsingJql', {
-        cloudId: r.site, jql: q[id].split('@').join(rel) + order, maxResults: CAP, searchResultMode: 'all',
-        fields: ['summary', 'issuetype', 'status', 'created', 'updated', 'assignee'],
+        cloudId: r.site, jql: q[id].split('@').join(rel) + order, maxResults: CAP, searchResultMode: 'all', fields: FIELDS,
       }).then(dataOf);
       const [dNew, dRecent, dMine] = await Promise.all([search('new'), search('recent'), search('mine')]);
       // A ticket seen before keeps the time it first came in, for the "from Fri" chip.
       const seenBefore = new Map();
       for (const id of ['new', 'recent']) for (const x of rowsOf(state.tabs[id])) if (x.key && x.seen) seenBefore.set(x.key, x.seen);
       const toRows = (data, keepSeen) => (Array.isArray(data.issues) ? data.issues : []).slice(0, CAP).map((it) => {
-        const f = it.fields || {};
-        const st = f.status || {};
-        const row = {
-          key: it.key, summary: f.summary || '', type: (f.issuetype && f.issuetype.name) || '',
-          status: st.name || '', statusCategory: (st.statusCategory && st.statusCategory.name) || '',
-          assignee: (f.assignee && f.assignee.displayName) || null,
-          created: isoFix(f.created), updated: isoFix(f.updated), url: base + '/browse/' + it.key,
-        };
+        const row = issueRow(it, base);
         if (keepSeen) row.seen = seenBefore.get(it.key) || nowIso;
         return row;
       });
       const totalOf = (data, rows) => (typeof data.totalCount === 'number' ? data.totalCount : rows.length);
-      // Unreviewed rows from earlier windows stay on their tab, newest first, up to CARRY_CAP.
-      const carry = (prev, skip) => prev
-        .filter((row) => row && row.key && !skip.has(row.key) && !isReviewed(row))
-        .map((row) => ({ ...row, carried: true }))
-        .sort((a, b) => (toDate(b.seen) || 0) - (toDate(a.seen) || 0))
-        .slice(0, CARRY_CAP);
       const freshNew = toRows(dNew, true);
       const freshRecent = toRows(dRecent, true);
-      const recentByKey = new Map(freshRecent.map((x) => [x.key, x]));
+      const mineRows = toRows(dMine, false);
+      // Tickets the three searches didn't return would keep their old look, so the ones that would carry over,
+      // and every flagged ticket, are re-read by key. If that search fails, they carry over as they were.
+      const fresh = new Map([...mineRows, ...freshRecent, ...freshNew].map((x) => [x.key, x]));
+      const unreviewed = (prev) => prev.filter((row) => row && row.key && !fresh.has(row.key) && !isReviewed(row)).map((row) => row.key);
+      const wanted = [...new Set([...unreviewed(rowsOf(state.tabs.new)), ...unreviewed(rowsOf(state.tabs.recent)), ...Object.keys(state.flags).filter(keyOk)])]
+        .filter((k) => !fresh.has(k));
+      let rechecked = null;
+      try { rechecked = await recheck(r.site, wanted); } catch (e) { rechecked = null; }
+      // A carried row takes its ticket's current look and keeps when it first came in; one Jira no longer returns is dropped.
+      const current = (row) => {
+        const now = fresh.get(row.key) || (rechecked && rechecked.get(row.key));
+        if (now) return { ...rowCopy(now), seen: row.seen, carried: true };
+        return rechecked ? null : row;
+      };
+      // Unreviewed rows from earlier windows stay on their tab, newest first, up to CARRY_CAP.
+      const carry = (prev, skip, x) => prev
+        .filter((row) => row && row.key && !skip.has(row.key) && !isReviewed(row))
+        .sort((a, b) => (toDate(b.seen) || 0) - (toDate(a.seen) || 0))
+        .slice(0, CARRY_CAP)
+        .map((row) => current({ ...row, carried: true }))
+        .filter((row) => row && allowed(x)(row));
       // A carried New ticket updated in this window takes the fresher data and stays on New.
-      const carriedNew = carry(rowsOf(state.tabs.new), new Set(freshNew.map((x) => x.key)))
-        .map((x) => (recentByKey.has(x.key) ? { ...recentByKey.get(x.key), seen: x.seen, carried: true } : x))
-        .filter(allowed(f.new));
+      const carriedNew = carry(rowsOf(state.tabs.new), new Set(freshNew.map((x) => x.key)), f.new);
       const newRows = freshNew.concat(carriedNew);
       const onNew = new Set(newRows.map((x) => x.key));
       const recentFresh = freshRecent.filter((x) => !onNew.has(x.key));
-      const carriedRecent = carry(rowsOf(state.tabs.recent), new Set([...onNew, ...recentFresh.map((x) => x.key)])).filter(allowed(f.recent));
-      const mineRows = toRows(dMine, false);
+      const carriedRecent = carry(rowsOf(state.tabs.recent), new Set([...onNew, ...recentFresh.map((x) => x.key)]), f.recent);
       const meta = (id) => ({ jql: shown(id), issueTypes: f[id].issueTypes, ignoreStatuses: f[id].ignoreStatuses });
       await state.db.doc('tabs/new').set({ rows: newRows, total: totalOf(dNew, freshNew), carried: carriedNew.length, ...meta('new') });
       await state.db.doc('tabs/recent').set({ rows: recentFresh.concat(carriedRecent), total: totalOf(dRecent, freshRecent), carried: carriedRecent.length, ...meta('recent') });
       await state.db.doc('tabs/mine').set({ rows: mineRows, total: totalOf(dMine, mineRows), ...meta('mine') });
+      // Flagged tickets' current rows, for the Flagged tab; the flags themselves are the user's and stay as they are.
+      if (rechecked) {
+        const flagRows = Object.keys(state.flags).filter(keyOk).map((k) => fresh.get(k) || rechecked.get(k)).filter(Boolean).map(rowCopy);
+        await state.db.doc('tabs/flagged').set({ rows: flagRows, at: nowIso });
+      }
       await state.db.doc('refresh/main').update({ at: nowIso, since: start.toISOString(), projects });
       pull.msg = '';
       if (opts && opts.filters) ui.msg = 'Saved and refreshed.';
@@ -1449,6 +1524,11 @@ td.when { font-variant-numeric: tabular-nums; }
     // Flags are optional too: if they can't load, nothing reads as flagged.
     db.collection('flags').onSnapshot((snap) => {
       state.flags = Object.fromEntries(snap.docs.map((d) => [d.id, d.data()]));
+      render();
+    }, () => {});
+    // Flagged tickets' current rows, from the last refresh or a one-off re-read; without them the flags' own copies show.
+    db.doc('tabs/flagged').onSnapshot((snap) => {
+      state.flagRows = snap.exists ? snap.data() : null;
       render();
     }, () => {});
     for (const tab of SEARCH_TABS) {

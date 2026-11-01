@@ -68,8 +68,9 @@ Documents:
   - `jql`: the query, for display, with the window start as an absolute date
   - `issueTypes` and `ignoreStatuses`: the tab settings the refresh used
 - `tabs/mine`: `rows`, `total`, `jql`, `issueTypes` and `ignoreStatuses`, with no review marks
+- `tabs/flagged`: `rows`, the current row of each flagged ticket as of the last refresh (rows a one-off re-read added since included), and `at`; not a tab of its own, it feeds the Flagged tab
 - `reviews/<KEY>`, one document per reviewed ticket, written by the page (or by Claude when asked): `reviewedAt`, and `updated`, the ticket's `updated` when it was reviewed. A row counts as reviewed when its review exists and the row's `updated` isn't later than the review's.
-- `flags/<KEY>`, one document per ticket flagged for discussion, written by the page (or by Claude when asked): `flaggedAt`, `note` (up to 200 characters, `""` when there's none) and `row`, a copy of the ticket's row (without `seen` or `carried`) from when it was flagged. The Flagged tab shows the freshest copy: the tabs' row with the latest `updated` when the ticket is on one, else `row`.
+- `flags/<KEY>`, one document per ticket flagged for discussion, written by the page (or by Claude when asked): `flaggedAt`, `note` (up to 200 characters, `""` when there's none) and `row`, a copy of the ticket's row (without `seen` or `carried`) from when it was flagged. The Flagged tab shows the freshest copy: the row with the latest `updated` among the tabs and `tabs/flagged`, else `row`.
 - `types/main`, written only when the types and statuses are read from Jira:
   - `types`: the issue types across the tracked projects, each `{name, subtask}`, sorted by name
   - `statuses`: the statuses across the tracked projects, each `{name, category}` with `category` `To Do`, `In Progress` or `Done`, sorted by name
@@ -89,7 +90,7 @@ A tab is one document, not one per ticket, because a batch takes at most 50 writ
 ## Refreshing
 
 1. **Find the window.** Get the current local time with its offset from the shell (`date -Iseconds`, or `Get-Date -Format o` in PowerShell). With a schedule (`refresh/main.schedule`), the window starts at the schedule's time on the previous refresh day, the last day before today in its `days`: for weekdays at 8:00, Friday's 8:00 for a Monday, or for a Saturday or Sunday run. With no schedule, it starts at 00:00 on the previous weekday (Monday to Friday): Friday's for a Monday or a weekend refresh. If `refresh/main` has an `at` older than that, start at `at` instead, so a missed run loses nothing. A refresh on demand, later the same day, uses the same start, so it never empties the tabs. `<N>` below is the minutes from the window start to now, rounded up; relative minutes don't depend on the time zone in the user's Jira profile, which absolute JQL dates do.
-2. **Read the current state.** `get` `settings/main`, `types/main`, `lists/projects`, `tabs/new` and `tabs/recent`, and `list` `reviews`. The tracked projects are `settings/main.projects`, else `refresh/main.projects`. Work out each tab's settings from `settings/main.tabs` (see The data for a tab with no entry). Types and statuses rarely change, so read them from Jira only when `types/main` doesn't exist, has no `statuses`, its `projects` differ from the tracked projects, or `settings/main.typesRequested` is later than `types/main.at`. To read them, through the connector's `executeRead`:
+2. **Read the current state.** `get` `settings/main`, `types/main`, `lists/projects`, `tabs/new` and `tabs/recent`, and `list` `reviews` and `flags`. The tracked projects are `settings/main.projects`, else `refresh/main.projects`. Work out each tab's settings from `settings/main.tabs` (see The data for a tab with no entry). Types and statuses rarely change, so read them from Jira only when `types/main` doesn't exist, has no `statuses`, its `projects` differ from the tracked projects, or `settings/main.typesRequested` is later than `types/main.at`. To read them, through the connector's `executeRead`:
    - for each tracked project, `listJiraProjectIssueTypesMetadata` with `projectIdOrKey` set to the key; merge the types by name, keeping each one's `subtask` flag
    - for each tracked project, `listJiraStatuses` with `mode` `project` and `projectKey` set to the key; merge the statuses by name, mapping each `category` (`new`, `indeterminate`, `done`) to `To Do`, `In Progress` or `Done`
    - once, `listJiraProjects` with `maxResults` 100 (and `startAt` for more pages), keeping each project's `key` and `name`, for `lists/projects`
@@ -98,15 +99,19 @@ A tab is one document, not one per ticket, because a batch takes at most 50 writ
    - New Tickets: `project in (<tracked projects>) <filter> AND created >= -<N>m`
    - Recent: `project in (<tracked projects>) <filter> AND updated >= -<N>m AND created < -<N>m`, which keeps this window's new tickets out
    - My Tickets: `assignee = currentUser() AND statusCategory != Done <filter>`
+
+   Then **recheck** the tickets these searches didn't return but the dashboard still shows, so they don't keep an old look: the old New and Recent rows that aren't reviewed, and every flagged ticket (`flags`), leaving out any key the three searches returned. Search for them by key, 100 keys at a time: `key in ("OPS-142", "CB-7") ORDER BY updated DESC` with the same `fields` and `maxResults` 100. Jira skips keys that no longer exist instead of failing, so a key it doesn't return is gone or hidden from the user. If this search fails anyway, carry rows over as they were, skip `tabs/flagged` in step 6, and go on.
 5. **Build the tabs.** Make rows from each search in the order Jira returned them. Give each New and Recent row a `seen`: the one it had on either tab before, or now. Then carry over the backlog:
-   - **New Tickets**: this window's rows, then the old New rows that aren't reviewed and aren't among them, with `carried: true`. When a carried ticket also came back in Recent's search, use that fresher row's fields and keep its `seen`.
+   - **New Tickets**: this window's rows, then the old New rows that aren't reviewed and aren't among them, with `carried: true`.
    - **Recent**: this window's rows minus any ticket now on New Tickets, then the old Recent rows that aren't reviewed and aren't on either list, with `carried: true`.
-   - Drop carried rows whose project isn't tracked any more (the key's prefix gives the project), or whose type or status the tab's settings now leave out, so a project removed or a status hidden today clears its old rows too.
+   - A carried row takes its ticket's current fields, from any of the three searches or the recheck, and keeps its `seen`. Drop one the recheck didn't return.
+   - Drop carried rows whose project isn't tracked any more (the key's prefix gives the project), or whose type or status the tab's settings now leave out, so a project removed, a status hidden today, or a ticket moved into a hidden status clears its row too.
    - Order carried rows newest `seen` first, and keep at most the carried-over cap per tab.
    - Write each tab's `jql` for display with the window start as an absolute local date, `"yyyy-MM-dd HH:mm"` in place of `-<N>m`. Don't build Jira search links: the page shows the query as text only.
 6. **Write**, in one `ArtifactData` `batch` on the dashboard's `url`:
    - `set` `tabs/new` and `tabs/recent` with `rows`, `total`, `carried`, `jql`, `issueTypes` and `ignoreStatuses`
    - `set` `tabs/mine` with `rows`, `total`, `jql`, `issueTypes` and `ignoreStatuses`
+   - unless the recheck failed: `set` `tabs/flagged` with `rows`, each flagged ticket's current row (from the searches or the recheck, without `seen` or `carried`), and `at` (now)
    - `set` `refresh/main` with `at` (now), `since` (the window start), `site`, `projects` (the tracked projects this refresh searched), and `schedule` (the one the task now runs on) when the task exists
    - only if the types and statuses were read from Jira: `set` `types/main` with `types`, `statuses`, `projects` and `at` (now), and `lists/projects` with `projects` and `at`
    - `delete` the `reviews` documents whose ticket is now on neither New Tickets nor Recent, at most 40 per refresh; the next refresh deletes the rest
@@ -131,6 +136,7 @@ The page's flag button next to each row's key, on every tab, sets or deletes `fl
 - "Flag OPS-142 for discussion", with or without a note ("…: ask who owns it"): take its row from a tab, else read the ticket with the connector's `getJiraIssue` (`cloudId` the Jira root URL) and build the row as a refresh would. `set` `flags/OPS-142` with `flaggedAt` (now), `note` (or `""`) and `row`. If it's already flagged, change only its note.
 - "Note on OPS-142: …" or "change the note": `update` `flags/OPS-142` with `note` and its `if_version`. Keep a note to 200 characters.
 - "Unflag OPS-142": `delete` it; its note goes with it.
+- "Update OPS-142", or the page's ↻ on a Flagged row: re-read that one ticket (`key in ("OPS-142")`, `maxResults` 1) and put its row into `tabs/flagged`'s `rows` in place of any old one, with `update` and its `if_version` (or `set` when it doesn't exist). If Jira doesn't return it, say it may be deleted or hidden from the user, and leave the flag.
 - "What's flagged?" or "what's up for discussion?": list the flags newest first, each with key, summary, status and note. Take the status from the tabs' row when the ticket is on one; otherwise it's from `row`, so say it's as of when it was flagged.
 - "Clear the flags", say after the meeting: confirm first, naming how many and that their notes go too, then one `batch` of `delete`s (at most 50 per batch).
 
@@ -174,7 +180,7 @@ The page shows:
   - status, coloured by its category: grey for To Do, blue for In Progress, green for Done
   - assignee, or "Unassigned"
   - created (New Tickets), updated (Recent, My Tickets) or flagged (Flagged), as a day and time
-- **Flagged tab:** the flags, most recently flagged first, each with its note and **Add note** or **Edit note** under the summary; editing is a text box with Save and Cancel (Enter and Esc). A ticket on no other tab shows as it was when flagged, with an "as of Tue" chip. It has no review marks or query.
+- **Flagged tab:** the flags, most recently flagged first, each with its note and **Add note** or **Edit note** under the summary; editing is a text box with Save and Cancel (Enter and Esc). Each row has a ↻ button, where the page can use the connector, that re-reads just that ticket. A ticket not read from Jira since it was flagged shows as it was then, with an "as of Tue" chip, and one Jira didn't return on ↻ says so. It has no review marks or query.
 - **Project view:** a menu above the rows, "All projects" by default, that shows one project's rows only. It changes nothing in the data; each device remembers its choice per tab in browser storage.
 - **Mark all reviewed** above the rows on New Tickets and Recent, while any are left; with one project shown, it marks only that project's rows.
 - **More than fit:** "25 of 40 shown". There are no links to Jira searches; each tab's query shows as text under its rows, and ticket keys link to their tickets.
@@ -186,7 +192,7 @@ The page shows:
   - **Projects:** a picker over every project from `lists/projects`, the tracked ones chosen, and Save projects (which also refreshes, reading the new projects' types and statuses first). Until the list is read, only the tracked projects show, with a button to load it.
   - **Tab settings:** a tab picker, then pickers for that tab's ticket types (types and sub-tasks) and statuses to hide (by category), Save (which also refreshes), Clear all, when the types and statuses were read, and **Re-read types and statuses**.
 
-The page's own refresh follows the same Refreshing steps, except that it can't change the scheduled task, writes the three tabs and then `refresh/main` (`at` and `since` only) one at a time since a page has no batch, and leaves deleting old reviews to Claude's refreshes. Like Claude's, it never changes flags. It reads `site` from `refresh/main`, and the tracked projects from `settings/main.projects` or else `refresh/main.projects`, so a dashboard needs one refresh by Claude before the page's **Refresh** works. When the tracked projects differ from `types/main.projects`, it reads the types, statuses and project list first. Where the page can't use the connector (not allowed, not set up, or opened outside claude.ai), it says so and the button stays a way to try again.
+The page's own refresh follows the same Refreshing steps, except that it can't change the scheduled task, writes the three tabs, `tabs/flagged` and then `refresh/main` (`at` and `since` only) one at a time since a page has no batch, and leaves deleting old reviews to Claude's refreshes. Like Claude's, it never changes flags. It reads `site` from `refresh/main`, and the tracked projects from `settings/main.projects` or else `refresh/main.projects`, so a dashboard needs one refresh by Claude before the page's **Refresh** works. When the tracked projects differ from `types/main.projects`, it reads the types, statuses and project list first. Where the page can't use the connector (not allowed, not set up, or opened outside claude.ai), it says so and the button stays a way to try again.
 
 ## Starting one
 
