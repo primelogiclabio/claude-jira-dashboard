@@ -1078,8 +1078,9 @@ td.when { font-variant-numeric: tabular-nums; }
       for (const tab of SEARCH_TABS) f[tab.id] = (opts && opts.filters && opts.filters[tab.id]) || savedFilter(tab.id);
       const clause = (x) => (x.issueTypes.length ? ' AND issuetype in (' + x.issueTypes.map(quote).join(', ') + ')' : '')
         + (x.ignoreStatuses.length ? ' AND status not in (' + x.ignoreStatuses.map(quote).join(', ') + ')' : '');
-      // Carried rows follow the tab's settings too, so a status hidden today drops its old rows.
-      const allowed = (x) => (row) => (!x.issueTypes.length || x.issueTypes.includes(row.type)) && !x.ignoreStatuses.includes(row.status);
+      // Carried rows follow the tracked projects and the tab's settings too, so a project dropped or a status hidden today drops its old rows.
+      const allowed = (x) => (row) => projects.includes(projectOf(row))
+        && (!x.issueTypes.length || x.issueTypes.includes(row.type)) && !x.ignoreStatuses.includes(row.status);
       // Keys are quoted: some, such as CF, are JQL reserved words.
       const projectScope = 'project in (' + projects.map(quote).join(', ') + ')';
       const order = ' ORDER BY updated DESC';

@@ -101,7 +101,7 @@ A tab is one document, not one per ticket, because a batch takes at most 50 writ
 5. **Build the tabs.** Make rows from each search in the order Jira returned them. Give each New and Recent row a `seen`: the one it had on either tab before, or now. Then carry over the backlog:
    - **New Tickets**: this window's rows, then the old New rows that aren't reviewed and aren't among them, with `carried: true`. When a carried ticket also came back in Recent's search, use that fresher row's fields and keep its `seen`.
    - **Recent**: this window's rows minus any ticket now on New Tickets, then the old Recent rows that aren't reviewed and aren't on either list, with `carried: true`.
-   - Drop carried rows whose type or status the tab's settings now leave out, so a status hidden today clears its old rows too.
+   - Drop carried rows whose project isn't tracked any more (the key's prefix gives the project), or whose type or status the tab's settings now leave out, so a project removed or a status hidden today clears its old rows too.
    - Order carried rows newest `seen` first, and keep at most the carried-over cap per tab.
    - Write each tab's `jql` for display with the window start as an absolute local date, `"yyyy-MM-dd HH:mm"` in place of `-<N>m`. Don't build Jira search links: the page shows the query as text only.
 6. **Write**, in one `ArtifactData` `batch` on the dashboard's `url`:
