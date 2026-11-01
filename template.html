@@ -901,7 +901,8 @@ td.when { font-variant-numeric: tabular-nums; }
         + (x.ignoreStatuses.length ? ' AND status not in (' + x.ignoreStatuses.map(quote).join(', ') + ')' : '');
       // Carried rows follow the tab's settings too, so a status hidden today drops its old rows.
       const allowed = (x) => (row) => (!x.issueTypes.length || x.issueTypes.includes(row.type)) && !x.ignoreStatuses.includes(row.status);
-      const projectScope = 'project in (' + projects.join(', ') + ')';
+      // Keys are quoted: some, such as CF, are JQL reserved words.
+      const projectScope = 'project in (' + projects.map(quote).join(', ') + ')';
       const order = ' ORDER BY updated DESC';
       const base = r.site.replace(/\/+$/, '');
       const nowIso = now.toISOString();
