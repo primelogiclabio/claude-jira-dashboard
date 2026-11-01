@@ -40,6 +40,10 @@
     // APP-411 reviewed and unchanged since; WEB-88 reviewed but updated after, so it reads as not reviewed.
     'reviews/APP-411': { reviewedAt: iso(2 * H), updated: newRows[1].updated },
     'reviews/WEB-88': { reviewedAt: iso(4 * H), updated: iso(5 * H) },
+    // Flags: APP-401 (on New) and APP-300 (on My Tickets) show their tab rows; OPS-17 is on no tab, so it shows its saved copy.
+    'flags/APP-401': { flaggedAt: iso(20 * H), note: 'Blocked for a week: who owns the export service now?', row: { ...newRows[3] } },
+    'flags/APP-300': { flaggedAt: iso(6 * H), note: '', row: { ...mineRows[0] } },
+    'flags/OPS-17': { flaggedAt: iso(120 * H), note: "Raise at Thursday's planning", row: mk('OPS-17', 'Rotate the staging database credentials', 'Task', 'To Do', 'To Do', 'Mei Chen', 300, 130) },
   };
   if (mode === 'none') for (const k of Object.keys(docs)) if (!k.startsWith('types/')) delete docs[k];
   if (mode === 'empty') { docs['tabs/new'] = { ...docs['tabs/new'], rows: [], total: 0, carried: 0 }; }

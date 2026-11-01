@@ -1,16 +1,19 @@
 ---
 name: jira-dashboard
-description: Morning snapshot of Jira tickets (new and recently updated on the tracked projects, plus the user's own open tickets) in a Jira dashboard artifact on claude.ai, refreshed through the Atlassian connector, with a reviewed mark that keeps unreviewed tickets as a backlog. Use whenever the user asks to refresh, update, start or show their Jira dashboard, set up or change its refresh schedule, mark dashboard tickets reviewed or asks what they haven't reviewed, or asks what's new in Jira or which tickets came in or changed since yesterday; the scheduled refresh task runs it too.
+description: Morning snapshot of Jira tickets (new and recently updated on the tracked projects, plus the user's own open tickets) in a Jira dashboard artifact on claude.ai, refreshed through the Atlassian connector, with a reviewed mark that keeps unreviewed tickets as a backlog and a flag for tickets to discuss. Use whenever the user asks to refresh, update, start or show their Jira dashboard, set up or change its refresh schedule, mark dashboard tickets reviewed or asks what they haven't reviewed, flags tickets for discussion or asks what's flagged, or asks what's new in Jira or which tickets came in or changed since yesterday; the scheduled refresh task runs it too.
 ---
 
 # Jira dashboard
 
-A claude.ai artifact page that saves the user searching Jira by hand each morning. It has three tabs:
+A claude.ai artifact page that saves the user searching Jira by hand each morning. It has four tabs:
 - **New Tickets**: tickets created on the tracked projects since the last scheduled refresh.
 - **Recent**: tickets on the tracked projects updated in that same window, leaving out the ones on New Tickets.
 - **My Tickets**: open tickets assigned to the user, on any project.
+- **Flagged**: every ticket the user flagged for discussion, with its note, until they unflag it.
 
 On New Tickets and Recent the user marks each ticket reviewed. A ticket they haven't reviewed stays on its tab after later refreshes, marked with the day it came in, so nothing slips by. A reviewed ticket drops off at the next refresh, and comes back on Recent if it's updated again.
+
+On any tab the user can flag a ticket to bring up with others, with an optional short note. Flags live only in the dashboard's database, never in Jira, and no refresh changes them.
 
 The page is built from `template.html` in this skill's folder. Its rows aren't in the page's code: they're in the artifact's own database, which the page shows live and Claude writes with the `ArtifactData` tool.
 
@@ -67,6 +70,7 @@ Documents:
   - `issueTypes` and `ignoreStatuses`: the tab settings the refresh used
 - `tabs/mine`: `rows`, `total`, `jql`, `issueTypes` and `ignoreStatuses`, with no review marks
 - `reviews/<KEY>`, one document per reviewed ticket, written by the page (or by Claude when asked): `reviewedAt`, and `updated`, the ticket's `updated` when it was reviewed. A row counts as reviewed when its review exists and the row's `updated` isn't later than the review's.
+- `flags/<KEY>`, one document per ticket flagged for discussion, written by the page (or by Claude when asked): `flaggedAt`, `note` (up to 200 characters, `""` when there's none) and `row`, a copy of the ticket's row (without `seen` or `carried`) from when it was flagged. The Flagged tab shows the freshest copy: the tabs' row with the latest `updated` when the ticket is on one, else `row`.
 - `types/main`, written only when the types and statuses are read from Jira:
   - `types`: the issue types across the tracked projects, each `{name, subtask}`, sorted by name
   - `statuses`: the statuses across the tracked projects, each `{name, category}` with `category` `To Do`, `In Progress` or `Done`, sorted by name
@@ -81,7 +85,7 @@ Documents:
   - `typesRequested`, optional: ISO timestamp of a **Re-read types and statuses** click made where the page couldn't reach Jira
   - `updatedAt`: ISO timestamp of the last change to the tab settings
 
-A tab is one document, not one per ticket, because a batch takes at most 50 writes and a refresh must replace the whole tab at once. Reviews are one document per ticket so a click never rewrites a tab and a refresh never rewrites a review.
+A tab is one document, not one per ticket, because a batch takes at most 50 writes and a refresh must replace the whole tab at once. Reviews and flags are one document per ticket so a click never rewrites a tab and a refresh never rewrites a review or a flag.
 
 ## Refreshing
 
@@ -108,7 +112,7 @@ A tab is one document, not one per ticket, because a batch takes at most 50 writ
    - only if the types and statuses were read from Jira: `set` `types/main` with `types`, `statuses`, `projects` and `at` (now), and `lists/projects` with `projects` and `at`
    - `delete` the `reviews` documents whose ticket is now on neither New Tickets nor Recent, at most 40 per refresh; the next refresh deletes the rest
 
-   Pass each read document's `version` as `if_version`; leave it out only for a document that doesn't exist yet. If the batch is refused because a document changed in between (say the user ticked a review), read again and redo steps 5 and 6. Never write `settings/main` during a refresh: a re-read request is done once `types/main.at` is later than it, and a schedule change once `refresh/main.schedule` matches it.
+   Pass each read document's `version` as `if_version`; leave it out only for a document that doesn't exist yet. If the batch is refused because a document changed in between (say the user ticked a review), read again and redo steps 5 and 6. Never write `settings/main` during a refresh: a re-read request is done once `types/main.at` is later than it, and a schedule change once `refresh/main.schedule` matches it. Never write or delete `flags` during a refresh either: a flag stays until the user unflags it.
 7. **Report.** On demand, reply with the counts per tab, how many tickets are left to review, up to five of them (key, summary, status) and the page's link. Mention when a `total` is more than the rows shown. A scheduled run writes and ends with one line: the counts, how many to review, and the new schedule if it changed.
 
 Never republish the page to refresh it. Its code changes only when the user asks for a change to the page itself.
@@ -121,6 +125,17 @@ The page's **Reviewed** checkbox on each New Tickets and Recent row sets or dele
 - "Mark everything reviewed": one `batch` of `set`s for the unreviewed rows (at most 50 per batch).
 
 There's no need to refresh after a review change; the page shows it at once.
+
+## Flagging for discussion
+
+The page's flag button next to each row's key, on every tab, sets or deletes `flags/<KEY>`. Flagging opens a note box under the row's summary right away, for why it's flagged; **Skip** or Esc keeps the flag without a note. A note shows under its ticket's summary on every tab. The **Flagged** tab lists the flags, most recently flagged first, with **Add note** or **Edit note** to change each one. In chat:
+- "Flag OPS-142 for discussion", with or without a note ("…: ask who owns it"): take its row from a tab, else read the ticket with the connector's `getJiraIssue` (`cloudId` the Jira root URL) and build the row as a refresh would. `set` `flags/OPS-142` with `flaggedAt` (now), `note` (or `""`) and `row`. If it's already flagged, change only its note.
+- "Note on OPS-142: …" or "change the note": `update` `flags/OPS-142` with `note` and its `if_version`. Keep a note to 200 characters.
+- "Unflag OPS-142": `delete` it; its note goes with it.
+- "What's flagged?" or "what's up for discussion?": list the flags newest first, each with key, summary, status and note. Take the status from the tabs' row when the ticket is on one; otherwise it's from `row`, so say it's as of when it was flagged.
+- "Clear the flags", say after the meeting: confirm first, naming how many and that their notes go too, then one `batch` of `delete`s (at most 50 per batch).
+
+As with reviews, the page shows a change at once; no refresh is needed.
 
 ## The scheduled refresh
 
@@ -148,16 +163,17 @@ When the user asks in chat to change a tab's settings ("only bugs on New Tickets
 The page shows:
 - **Header:** "Jira Dashboard", the Jira site and tracked projects, when it was refreshed (`refresh/main.at`) and the next scheduled refresh, and a **Refresh** button.
 - **Theme switch:** Auto, Light or Dark. Auto follows claude.ai's theme; each device remembers its own choice in browser storage.
-- **Tabs:** New Tickets, Recent and My Tickets. New Tickets and Recent count the tickets left to review; My Tickets counts its tickets.
-- **Summary**, for the tab shown: how many tickets ("6 new tickets since Fri 8:00", "4 tickets updated since Fri 8:00", "12 open tickets assigned to you"), how many to review and from earlier days, and the split by project and by status category.
+- **Tabs:** New Tickets, Recent, My Tickets and Flagged. New Tickets and Recent count the tickets left to review; My Tickets counts its tickets; Flagged counts its flags, once there are any.
+- **Summary**, for the tab shown: how many tickets ("6 new tickets since Fri 8:00", "4 tickets updated since Fri 8:00", "12 open tickets assigned to you", "3 tickets flagged for discussion"), how many to review and from earlier days, and the split by project and by status category.
 - **Rows**, most recently updated first, carried ones after:
   - on New Tickets and Recent, a **Reviewed** checkbox; reviewed rows are dimmed, and carried ones have a "from Fri" chip
-  - key, linked to the ticket
-  - summary
+  - key, linked to the ticket, then a flag button, filled when the ticket is flagged, with the note in its tooltip. Flagging opens a note box under the summary ("Why flag it? (optional)"), with Save and Skip.
+  - summary, and a flagged ticket's note under it, with **Edit note**
   - type
   - status, coloured by its category: grey for To Do, blue for In Progress, green for Done
   - assignee, or "Unassigned"
-  - created (New Tickets) or updated (Recent, My Tickets), as a day and time
+  - created (New Tickets), updated (Recent, My Tickets) or flagged (Flagged), as a day and time
+- **Flagged tab:** the flags, most recently flagged first, each with its note and **Add note** or **Edit note** under the summary; editing is a text box with Save and Cancel (Enter and Esc). A ticket on no other tab shows as it was when flagged, with an "as of Tue" chip. It has no review marks or query.
 - **Project view:** a menu above the rows, "All projects" by default, that shows one project's rows only. It changes nothing in the data; each device remembers its choice per tab in browser storage.
 - **Mark all reviewed** above the rows on New Tickets and Recent, while any are left; with one project shown, it marks only that project's rows.
 - **More than fit:** "25 of 40 shown". There are no links to Jira searches; each tab's query shows as text under its rows, and ticket keys link to their tickets.
@@ -169,7 +185,7 @@ The page shows:
   - **Projects:** a picker over every project from `lists/projects`, the tracked ones chosen, and Save projects (which also refreshes, reading the new projects' types and statuses first). Until the list is read, only the tracked projects show, with a button to load it.
   - **Tab settings:** a tab picker, then pickers for that tab's ticket types (types and sub-tasks) and statuses to hide (by category), Save (which also refreshes), Clear all, when the types and statuses were read, and **Re-read types and statuses**.
 
-The page's own refresh follows the same Refreshing steps, except that it can't change the scheduled task, writes the three tabs and then `refresh/main` (`at` and `since` only) one at a time since a page has no batch, and leaves deleting old reviews to Claude's refreshes. It reads `site` from `refresh/main`, and the tracked projects from `settings/main.projects` or else `refresh/main.projects`, so a dashboard needs one refresh by Claude before the page's **Refresh** works. When the tracked projects differ from `types/main.projects`, it reads the types, statuses and project list first. Where the page can't use the connector (not allowed, not set up, or opened outside claude.ai), it says so and the button stays a way to try again.
+The page's own refresh follows the same Refreshing steps, except that it can't change the scheduled task, writes the three tabs and then `refresh/main` (`at` and `since` only) one at a time since a page has no batch, and leaves deleting old reviews to Claude's refreshes. Like Claude's, it never changes flags. It reads `site` from `refresh/main`, and the tracked projects from `settings/main.projects` or else `refresh/main.projects`, so a dashboard needs one refresh by Claude before the page's **Refresh** works. When the tracked projects differ from `types/main.projects`, it reads the types, statuses and project list first. Where the page can't use the connector (not allowed, not set up, or opened outside claude.ai), it says so and the button stays a way to try again.
 
 ## Starting one
 
