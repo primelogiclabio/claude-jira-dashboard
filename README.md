@@ -10,9 +10,9 @@ Ask Claude to start one and it publishes the page from
 you the link. It replaces opening Jira and running the same searches by hand
 every morning.
 
-**Status:** early. It works end to end on one setup and is being used daily
-before it goes into the
-[claude-tools](https://github.com/primelogiclabio/claude-tools) marketplace.
+**Status:** early. It works end to end on one setup and is used daily. It
+installs from the [claude-tools](https://github.com/primelogiclabio/claude-tools)
+marketplace (see [Install](#install)).
 
 ## What the page shows
 
@@ -86,26 +86,48 @@ an Editor) can read them. They're refreshed three ways, all by the same rules:
   database.
 - The **Claude desktop app**, only for a scheduled refresh.
 
-## Try it
+## Install
 
-It isn't in the marketplace yet. From a clone, either load it for one
-session:
+One line installs it, in either of two places:
 
-```sh
-claude --plugin-dir C:\src\claude-jira-dashboard
-```
+- **Inside a Claude Code session** (CLI or desktop Code tab, 2.1.275+), type:
+  ```
+  /plugin install jira-dashboard --marketplace primelogiclabio/claude-tools
+  ```
+- **From a terminal** (PowerShell, bash; CLI 2.1.292+), run:
+  ```
+  claude plugin install jira-dashboard --marketplace primelogiclabio/claude-tools
+  ```
 
-or link the folder into your skills directory (put your clone's path in place
-of `C:\src\claude-jira-dashboard`):
-
-```powershell
-New-Item -ItemType Junction -Path "$HOME\.claude\skills\jira-dashboard" -Target "C:\src\claude-jira-dashboard"
-```
-
+Both add the `claude-tools` marketplace first if you haven't added it yet.
 Then ask Claude to start a Jira dashboard.
+
+The step-by-step instructions for both paths are in the
+[claude-tools README](https://github.com/primelogiclabio/claude-tools#installing).
+Notes specific to this skill:
+
+- **As a plain skill, without the plugin wrapper.** Clone this repo and link
+  it into your skills directory. Put your clone's path in place of
+  `C:\src\claude-jira-dashboard`:
+
+  ```powershell
+  New-Item -ItemType Junction -Path "$HOME\.claude\skills\jira-dashboard" -Target "C:\src\claude-jira-dashboard"
+  ```
+
+  Remove the link only with `cmd /c rmdir "$HOME\.claude\skills\jira-dashboard"`.
+  Never use `Remove-Item -Recurse` on a junction.
+- **Avoid loading it twice.** If this skill is already saved to your claude.ai
+  account under **Customize › Skills**, it syncs into signed-in Claude Code
+  sessions as `jira-dashboard`. Installing the plugin as well adds a second
+  copy, `jira-dashboard:jira-dashboard`, and the two compete. Keep one.
+- **Your dashboard stays yours.** The skill holds no artifact link, Jira site
+  or data; each person's dashboard is their own private artifact, reading
+  their own Jira through their own connector.
 
 ## Developing
 
+- `claude --plugin-dir C:\src\claude-jira-dashboard` loads a clone for one
+  session, to try changes before they're released.
 - `claude plugin validate .` checks the manifest.
 - `dev/build-preview.ps1` builds local previews of the page with made-up data
   (`dev/mock.js`, which stands in for claude.ai's database and the Atlassian
