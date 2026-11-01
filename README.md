@@ -13,7 +13,6 @@ every morning.
 **Status:** early. It works end to end on one setup and is being used daily
 before it goes into the
 [claude-tools](https://github.com/primelogiclabio/claude-tools) marketplace.
-The plan is in [`PLAN.md`](PLAN.md).
 
 ## What the page shows
 
@@ -105,7 +104,6 @@ claude-jira-dashboard/
 ├── .claude-plugin/plugin.json   lets this folder install as a plugin
 ├── SKILL.md                     the skill: frontmatter + instructions
 ├── template.html                the dashboard page Claude publishes
-├── PLAN.md                      the plan, in project-progress format
 ├── dev/                         preview kit: mock.js, build-preview.ps1
 └── README.md                    this file
 ```
