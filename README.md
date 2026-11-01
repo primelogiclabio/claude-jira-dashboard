@@ -49,7 +49,8 @@ only in the dashboard, never in Jira.
 - **Projects:** which projects New Tickets and Recent search.
 - **Tab settings:** for each tab, the ticket types it includes and the
   statuses it hides.
-- **Refresh schedule:** the days and time of the morning refresh.
+- **Refresh schedule:** the days and time of a scheduled refresh, if you want
+  one, and **Turn off scheduled refresh** to stop it.
 - A project menu above each tab's rows shows one project at a time, and an
   **Auto / Light / Dark** switch sets the theme. Each device remembers both.
 
@@ -59,9 +60,11 @@ The tickets aren't written into the page. They're records stored with the
 artifact on claude.ai, in its own database, and only you (and anyone you make
 an Editor) can read them. They're refreshed three ways, all by the same rules:
 
-- **On a schedule:** a Claude desktop scheduled task, weekdays at 8:00 by
-  default. Claude sets it up when you ask. It runs while the desktop app is
-  open; a run missed while the app was closed happens when it next opens.
+- **On a schedule, if you want one:** a Claude desktop scheduled task. There's
+  none by default; Claude sets it up when you ask, and turns it off when you
+  ask or press **Turn off scheduled refresh** on the page. It runs while the
+  desktop app is open; a run missed while the app was closed happens when it
+  next opens.
 - **When you ask** Claude in a Claude Code session ("refresh my Jira
   dashboard").
 - **From the page:** the **Refresh** button, or saving a setting, queries Jira
@@ -76,7 +79,7 @@ an Editor) can read them. They're refreshed three ways, all by the same rules:
 - **Claude Code** (CLI, desktop Code tab or VS Code), which has the tools to
   publish the page and write its records. Chat artifacts on claude.ai have no
   database.
-- The **Claude desktop app** for the scheduled refresh.
+- The **Claude desktop app**, only for a scheduled refresh.
 
 ## Try it
 
@@ -102,10 +105,10 @@ Then ask Claude to start a Jira dashboard.
 - `dev/build-preview.ps1` builds local previews of the page with made-up data
   (`dev/mock.js`, which stands in for claude.ai's database and the Atlassian
   connector) into `dev/out/`, one file per state: full, dark, no refresh yet,
-  empty, and a dashboard from before the newer tabs.
+  empty, a dashboard from before the newer tabs, and no scheduled refresh.
 - [`SKILL.md`](SKILL.md) holds the rules Claude follows; the page's own
   refresh in `template.html` follows the same rules and keeps its own copy of
-  the row caps and default schedule, so change them together.
+  the row caps and the window with no schedule, so change them together.
 
 ## Files
 

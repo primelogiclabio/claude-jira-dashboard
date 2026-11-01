@@ -1,12 +1,12 @@
 ---
 name: jira-dashboard
-description: Morning snapshot of Jira tickets (new and recently updated on the tracked projects, plus the user's own open tickets) in a Jira dashboard artifact on claude.ai, refreshed through the Atlassian connector, with a reviewed mark that keeps unreviewed tickets as a backlog and a flag for tickets to discuss. Use whenever the user asks to refresh, update, start or show their Jira dashboard, set up or change its refresh schedule, mark dashboard tickets reviewed or asks what they haven't reviewed, flags tickets for discussion or asks what's flagged, or asks what's new in Jira or which tickets came in or changed since yesterday; the scheduled refresh task runs it too.
+description: Morning snapshot of Jira tickets (new and recently updated on the tracked projects, plus the user's own open tickets) in a Jira dashboard artifact on claude.ai, refreshed through the Atlassian connector, with a reviewed mark that keeps unreviewed tickets as a backlog and a flag for tickets to discuss. Use whenever the user asks to refresh, update, start or show their Jira dashboard, set up, change or turn off its refresh schedule, mark dashboard tickets reviewed or asks what they haven't reviewed, flags tickets for discussion or asks what's flagged, or asks what's new in Jira or which tickets came in or changed since yesterday; the scheduled refresh task runs it too.
 ---
 
 # Jira dashboard
 
 A claude.ai artifact page that saves the user searching Jira by hand each morning. It has four tabs:
-- **New Tickets**: tickets created on the tracked projects since the last scheduled refresh.
+- **New Tickets**: tickets created on the tracked projects since the previous refresh day (see Refreshing).
 - **Recent**: tickets on the tracked projects updated in that same window, leaving out the ones on New Tickets.
 - **My Tickets**: open tickets assigned to the user, on any project.
 - **Flagged**: every ticket the user flagged for discussion, with its note, until they unflag it.
@@ -18,7 +18,7 @@ On any tab the user can flag a ticket to bring up with others, with an optional 
 The page is built from `template.html` in this skill's folder. Its rows aren't in the page's code: they're in the artifact's own database, which the page shows live and Claude writes with the `ArtifactData` tool.
 
 A refresh happens three ways, all following the same rules:
-- the scheduled task runs this skill on the refresh schedule (weekdays at 8:00 by default);
+- the scheduled task runs this skill on the refresh schedule, if the user set one up (there's none by default);
 - the user asks Claude in chat;
 - the user presses **Refresh** on the page, or saves the ticket types, and the page queries Jira itself through the user's Atlassian connector.
 
@@ -28,9 +28,8 @@ Each dashboard keeps its own Jira site and projects in its database:
 - **Jira site:** `refresh/main.site`, set when the dashboard is started (below).
 - **Tracked projects:** `settings/main.projects`, else `refresh/main.projects`. The page's **Settings › Projects** changes them.
 
-These values are fixed for now; later they become plugin options. The page keeps its own copy of the caps and the default schedule, so change them there too.
+These values are fixed for now; later they become plugin options. The page keeps its own copy of the caps and of the window with no schedule, so change them there too.
 
-- Default refresh schedule: weekdays (Monday to Friday) at 08:00 local time
 - Row cap per search: 25 (New Tickets, Recent and My Tickets each)
 - Carried-over cap: 50 unreviewed tickets per tab from earlier windows
 - Scheduled task id: `jira-dashboard-refresh`
@@ -39,7 +38,7 @@ These values are fixed for now; later they become plugin options. The page keeps
 
 - **The Atlassian connector**, Atlassian's own MCP server, set up on the user's account. Its tool names carry a per-account prefix (`mcp__<id>__searchJiraIssuesUsingJql`), so look for the tool by its last part. If `searchJiraIssuesUsingJql` isn't there, write nothing: say the dashboard needs the Atlassian connector and that it's added under **Settings › Connectors** on claude.ai. In a scheduled run there's no one to ask, so stop there.
 - **The `Artifact` and `ArtifactData` tools**, which Claude Code sessions have. Chat artifacts on claude.ai have no database: without these tools, say the dashboard is refreshed from Claude Code, and change nothing.
-- **The desktop app's scheduled-tasks tools** (`create_scheduled_task`, `update_scheduled_task`, `list_scheduled_tasks`) for the scheduled refresh. Without them, refresh anyway and leave the schedule as it is.
+- **The desktop app's scheduled-tasks tools** (`create_scheduled_task`, `update_scheduled_task`, `delete_scheduled_task`, `list_scheduled_tasks`) for the scheduled refresh. Without them, refresh anyway and leave the schedule as it is.
 
 ## Finding the dashboard
 
@@ -81,7 +80,7 @@ Documents:
   - `projects`, optional: the project keys New Tickets and Recent search; missing means the ones in `refresh/main.projects`
   - `tabs`: per-tab settings, `{new, recent, mine}`, each `{issueTypes, ignoreStatuses}`: the ticket types the tab includes (empty means every type) and the statuses it hides. A tab with no entry uses the older top-level `issueTypes` for New Tickets and Recent, and every type for My Tickets, and hides no statuses.
   - `issueTypes`, from before per-tab settings: the types New Tickets and Recent included
-  - `schedule`, optional: the refresh schedule the user picked; it takes effect when Claude applies it to the task (below)
+  - `schedule`, optional: the refresh schedule the user picked, or `null` once they've asked to turn the scheduled refresh off; either takes effect when Claude applies it (below)
   - `typesRequested`, optional: ISO timestamp of a **Re-read types and statuses** click made where the page couldn't reach Jira
   - `updatedAt`: ISO timestamp of the last change to the tab settings
 
@@ -89,12 +88,12 @@ A tab is one document, not one per ticket, because a batch takes at most 50 writ
 
 ## Refreshing
 
-1. **Find the window.** Get the current local time with its offset from the shell (`date -Iseconds`, or `Get-Date -Format o` in PowerShell). Take the schedule from `refresh/main.schedule`, or the default. The window starts at the schedule's time on the previous refresh day, the last day before today in its `days`: with the default, Friday's 8:00 for a Monday, or for a Saturday or Sunday run. If `refresh/main` has an `at` older than that, start at `at` instead, so a missed run loses nothing. A refresh on demand, later the same day, uses the same start, so it never empties the tabs. `<N>` below is the minutes from the window start to now, rounded up; relative minutes don't depend on the time zone in the user's Jira profile, which absolute JQL dates do.
+1. **Find the window.** Get the current local time with its offset from the shell (`date -Iseconds`, or `Get-Date -Format o` in PowerShell). With a schedule (`refresh/main.schedule`), the window starts at the schedule's time on the previous refresh day, the last day before today in its `days`: for weekdays at 8:00, Friday's 8:00 for a Monday, or for a Saturday or Sunday run. With no schedule, it starts at 00:00 on the previous weekday (Monday to Friday): Friday's for a Monday or a weekend refresh. If `refresh/main` has an `at` older than that, start at `at` instead, so a missed run loses nothing. A refresh on demand, later the same day, uses the same start, so it never empties the tabs. `<N>` below is the minutes from the window start to now, rounded up; relative minutes don't depend on the time zone in the user's Jira profile, which absolute JQL dates do.
 2. **Read the current state.** `get` `settings/main`, `types/main`, `lists/projects`, `tabs/new` and `tabs/recent`, and `list` `reviews`. The tracked projects are `settings/main.projects`, else `refresh/main.projects`. Work out each tab's settings from `settings/main.tabs` (see The data for a tab with no entry). Types and statuses rarely change, so read them from Jira only when `types/main` doesn't exist, has no `statuses`, its `projects` differ from the tracked projects, or `settings/main.typesRequested` is later than `types/main.at`. To read them, through the connector's `executeRead`:
    - for each tracked project, `listJiraProjectIssueTypesMetadata` with `projectIdOrKey` set to the key; merge the types by name, keeping each one's `subtask` flag
    - for each tracked project, `listJiraStatuses` with `mode` `project` and `projectKey` set to the key; merge the statuses by name, mapping each `category` (`new`, `indeterminate`, `done`) to `To Do`, `In Progress` or `Done`
    - once, `listJiraProjects` with `maxResults` 100 (and `startAt` for more pages), keeping each project's `key` and `name`, for `lists/projects`
-3. **Apply a schedule change.** If `settings/main.schedule` differs from `refresh/main.schedule` and the task exists (`list_scheduled_tasks`), `update_scheduled_task` `jira-dashboard-refresh` with the cron expression for it: `<minute> <hour> * * <days>`, such as `0 8 * * 1,2,3,4,5`, and use the new schedule from here on. The app refuses changes to scheduled tasks in a run nobody is watching, so a scheduled run skips this step, and so does a session without the scheduled-tasks tools; the page keeps showing the change as waiting until the user asks Claude to apply it.
+3. **Apply a schedule change.** If `settings/main.schedule` differs from `refresh/main.schedule` and the task exists (`list_scheduled_tasks`), `update_scheduled_task` `jira-dashboard-refresh` with the cron expression for it: `<minute> <hour> * * <days>`, such as `0 8 * * 1,2,3,4,5`, and use the new schedule from here on. If it's `null`, turn the scheduled refresh off (The scheduled refresh, below) and refresh with no schedule. If it's a schedule and no task exists, offer to set one up; don't create it unasked. The app refuses changes to scheduled tasks in a run nobody is watching, so a scheduled run skips this step, and so does a session without the scheduled-tasks tools; the page keeps showing the change as waiting until the user asks Claude to apply it.
 4. **Search**, three times, with `searchJiraIssuesUsingJql`, `cloudId` the Jira root URL, `fields` `["summary", "issuetype", "status", "created", "updated", "assignee"]`, `maxResults` the row cap and `searchResultMode` `all` (which also returns `totalCount`). Each tab's `<filter>` is `AND issuetype in ("Customer Bug", "Internal Bug")` when its settings name types, then `AND status not in ("Paused", "Draft")` when they hide statuses, each name in double quotes; either part is left out when empty. Every query ends `ORDER BY updated DESC`. `<tracked projects>` is the keys, each in double quotes too, such as `"OPS", "CF"`: some keys, like CF, are JQL reserved words and fail unquoted.
    - New Tickets: `project in (<tracked projects>) <filter> AND created >= -<N>m`
    - Recent: `project in (<tracked projects>) <filter> AND updated >= -<N>m AND created < -<N>m`, which keeps this window's new tickets out
@@ -112,7 +111,7 @@ A tab is one document, not one per ticket, because a batch takes at most 50 writ
    - only if the types and statuses were read from Jira: `set` `types/main` with `types`, `statuses`, `projects` and `at` (now), and `lists/projects` with `projects` and `at`
    - `delete` the `reviews` documents whose ticket is now on neither New Tickets nor Recent, at most 40 per refresh; the next refresh deletes the rest
 
-   Pass each read document's `version` as `if_version`; leave it out only for a document that doesn't exist yet. If the batch is refused because a document changed in between (say the user ticked a review), read again and redo steps 5 and 6. Never write `settings/main` during a refresh: a re-read request is done once `types/main.at` is later than it, and a schedule change once `refresh/main.schedule` matches it. Never write or delete `flags` during a refresh either: a flag stays until the user unflags it.
+   Pass each read document's `version` as `if_version`; leave it out only for a document that doesn't exist yet. If the batch is refused because a document changed in between (say the user ticked a review), read again and redo steps 5 and 6. Never write `settings/main` during a refresh, except to clear its `schedule` when turning the scheduled refresh off: a re-read request is done once `types/main.at` is later than it, and a schedule change once `refresh/main.schedule` matches it. Never write or delete `flags` during a refresh either: a flag stays until the user unflags it.
 7. **Report.** On demand, reply with the counts per tab, how many tickets are left to review, up to five of them (key, summary, status) and the page's link. Mention when a `total` is more than the rows shown. A scheduled run writes and ends with one line: the counts, how many to review, and the new schedule if it changed.
 
 Never republish the page to refresh it. Its code changes only when the user asks for a change to the page itself.
@@ -139,13 +138,15 @@ As with reviews, the page shows a change at once; no refresh is needed.
 
 ## The scheduled refresh
 
-A desktop-app scheduled task, `jira-dashboard-refresh`, runs a refresh on the schedule. It runs while the Claude desktop app is open; a run missed while the app was closed happens when it next opens. A plugin can't ship a scheduled task, so Claude creates it when the user asks ("set up the morning refresh"):
+There's no scheduled refresh unless the user wants one: without it, the dashboard refreshes when they press **Refresh** or ask Claude. When there is one, a desktop-app scheduled task, `jira-dashboard-refresh`, runs a refresh on the schedule. It runs while the Claude desktop app is open; a run missed while the app was closed happens when it next opens. A plugin can't ship a scheduled task, and none is made by default, so Claude creates it only when the user asks ("set up the morning refresh"):
 
-1. `create_scheduled_task` with `taskId` `jira-dashboard-refresh`, `title` "Jira dashboard refresh", the cron expression for the schedule (`settings/main.schedule`, or the default), and a self-contained prompt: refresh the Jira dashboard at the dashboard's URL by following this skill's **Refreshing** steps, read from this SKILL.md's full path; it's an unattended run, so ask nothing, and if something needed is missing, write nothing and say why in the last message.
+1. `create_scheduled_task` with `taskId` `jira-dashboard-refresh`, `title` "Jira dashboard refresh", the cron expression for the schedule (`settings/main.schedule` if it's set; otherwise ask for the days and time, suggesting weekdays at 8:00), and a self-contained prompt: refresh the Jira dashboard at the dashboard's URL by following this skill's **Refreshing** steps, read from this SKILL.md's full path; it's an unattended run, so ask nothing, and if something needed is missing, write nothing and say why in the last message.
 2. Run a refresh, so `refresh/main.schedule` records the schedule and the page shows the next run.
 3. Tell the user it runs while the desktop app is open, and that a missed run happens when it next opens.
 
 When the user asks in chat to change the schedule, do step 3 of Refreshing straight away: `update_scheduled_task`, then `update` `refresh/main.schedule` (and `settings/main.schedule`, if set, to match) with their `if_version`.
+
+When the user asks to turn it off ("stop the morning refresh", "I don't want a schedule"), or `settings/main.schedule` is `null` from the page's **Turn off scheduled refresh**: `delete_scheduled_task` `jira-dashboard-refresh` if it exists, then `update` `refresh/main` and `settings/main` with `schedule: {"__delete__": true}` and their `if_version`, so neither holds a schedule. Refreshes then use the window with no schedule. A scheduled run can't delete tasks, so it leaves this for a chat.
 
 ## Tab settings
 
@@ -161,7 +162,7 @@ When the user asks in chat to change a tab's settings ("only bugs on New Tickets
 ## The page
 
 The page shows:
-- **Header:** "Jira Dashboard", the Jira site and tracked projects, when it was refreshed (`refresh/main.at`) and the next scheduled refresh, and a **Refresh** button.
+- **Header:** "Jira Dashboard", the Jira site and tracked projects, when it was refreshed (`refresh/main.at`) and, if there's a schedule, the next scheduled refresh, and a **Refresh** button.
 - **Theme switch:** Auto, Light or Dark. Auto follows claude.ai's theme; each device remembers its own choice in browser storage.
 - **Tabs:** New Tickets, Recent, My Tickets and Flagged. New Tickets and Recent count the tickets left to review; My Tickets counts its tickets; Flagged counts its flags, once there are any.
 - **Summary**, for the tab shown: how many tickets ("6 new tickets since Fri 8:00", "4 tickets updated since Fri 8:00", "12 open tickets assigned to you", "3 tickets flagged for discussion"), how many to review and from earlier days, and the split by project and by status category.
@@ -181,7 +182,7 @@ The page shows:
 - **Pickers** in Settings show the chosen items as chips with × to remove them, and **Choose…** opens a panel with a filter box and the options in aligned columns, grouped.
 - **Before the first refresh:** a short notice to ask Claude to refresh the dashboard; a tab that a newer page added and no refresh has filled yet says it fills at the next refresh.
 - **Settings**, collapsed:
-  - **Refresh schedule:** the schedule the task runs on, day checkboxes and a time, and Save schedule. A saved change shows as waiting until the user asks Claude to apply it.
+  - **Refresh schedule:** the schedule the task runs on, or "No scheduled refresh" with no days ticked and no time; day checkboxes and a time, and Save schedule; **Turn off scheduled refresh** (or **Clear schedule** when one is saved but not set up yet), which saves `null`, with **Keep it** to undo. A saved change or turn-off shows as waiting until the user asks Claude to apply it.
   - **Projects:** a picker over every project from `lists/projects`, the tracked ones chosen, and Save projects (which also refreshes, reading the new projects' types and statuses first). Until the list is read, only the tracked projects show, with a button to load it.
   - **Tab settings:** a tab picker, then pickers for that tab's ticket types (types and sub-tasks) and statuses to hide (by category), Save (which also refreshes), Clear all, when the types and statuses were read, and **Re-read types and statuses**.
 
@@ -201,7 +202,7 @@ The page's own refresh follows the same Refreshing steps, except that it can't c
    - **Site:** list the sites with the connector's `getAccessibleAtlassianResources`. Take the only one, or ask which when there are several. Use its URL, such as `https://example.atlassian.net`.
    - **Projects:** ask which projects New Tickets and Recent should track. To help, offer the projects of the user's recent tickets (`assignee = currentUser() OR reporter = currentUser()`, updated in the last 90 days) or the list from `listJiraProjects`.
    - `set` `settings/main` with `projects`. The first refresh writes `site` and `projects` into `refresh/main`.
-4. Run a first refresh (above), then give the user the link, and offer to set up the scheduled refresh.
+4. Run a first refresh (above), then give the user the link, and offer to set up a scheduled refresh; there's none unless they want one.
 
 ## Changing the page itself
 

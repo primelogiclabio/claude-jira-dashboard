@@ -1,5 +1,6 @@
 // Local stand-in for window.claude so template.html can be previewed outside claude.ai.
 // window.__previewState: 'full' (default) | 'none' (no refresh yet) | 'empty' | 'slow' | 'oldtabs' (only tabs/new exists)
+//   | 'noschedule' (no scheduled refresh set up)
 (() => {
   const mode = window.__previewState || 'full';
   const now = Date.now();
@@ -48,6 +49,7 @@
   if (mode === 'none') for (const k of Object.keys(docs)) if (!k.startsWith('types/')) delete docs[k];
   if (mode === 'empty') { docs['tabs/new'] = { ...docs['tabs/new'], rows: [], total: 0, carried: 0 }; }
   if (mode === 'oldtabs') { delete docs['tabs/recent']; delete docs['tabs/mine']; }
+  if (mode === 'noschedule') { const { schedule, ...rest } = docs['refresh/main']; docs['refresh/main'] = rest; }
   window.__mockDocs = docs;
 
   const meta = { fromCache: false, hasPendingWrites: false };
