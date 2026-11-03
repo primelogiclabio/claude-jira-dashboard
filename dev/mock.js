@@ -1,6 +1,6 @@
 // Local stand-in for window.claude so template.html can be previewed outside claude.ai.
 // window.__previewState: 'full' (default) | 'none' (no refresh yet) | 'empty' | 'slow' | 'oldtabs' (only tabs/new exists)
-//   | 'noschedule' (no scheduled refresh set up)
+//   | 'noschedule' (no scheduled refresh set up) | 'legacyhide' (New Tickets saved with the older list of statuses to hide)
 (() => {
   const mode = window.__previewState || 'full';
   const now = Date.now();
@@ -50,6 +50,10 @@
   if (mode === 'empty') { docs['tabs/new'] = { ...docs['tabs/new'], rows: [], total: 0, carried: 0 }; }
   if (mode === 'oldtabs') { delete docs['tabs/recent']; delete docs['tabs/mine']; }
   if (mode === 'noschedule') { const { schedule, ...rest } = docs['refresh/main']; docs['refresh/main'] = rest; }
+  if (mode === 'legacyhide') {
+    docs['settings/main'] = { tabs: { new: { issueTypes: [], ignoreStatuses: ['Blocked'] } } };
+    docs['tabs/new'] = { ...docs['tabs/new'], rows: newRows.slice(0, 3), carried: 0, ignoreStatuses: ['Blocked'] };
+  }
   window.__mockDocs = docs;
 
   const meta = { fromCache: false, hasPendingWrites: false };
