@@ -165,6 +165,8 @@ td.key .flag:focus-visible, td.key .recheck:focus-visible { outline: 2px solid v
 }
 .optpanel input[type="search"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .optgroup { display: grid; gap: 4px; }
+.optgroup-head { display: flex; align-items: baseline; gap: 12px; }
+.optgroup-head .linkbtn { font-size: 0.8rem; }
 .optgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0 12px; }
 .optgrid label {
   display: flex; align-items: center; gap: 8px; min-width: 0;
@@ -402,14 +404,17 @@ td.when { font-variant-numeric: tabular-nums; }
   }
   const typeList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : []);
   const sameTypes = (a, b) => a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
-  // Each tab filters by ticket types (none means every type) and hides the statuses listed.
+  // Each tab shows the ticket types and statuses listed (none means every one). Tabs saved before the
+  // status list hid the statuses in ignoreStatuses instead, which still applies while statuses is empty.
   // A dashboard saved before per-tab settings had one issueTypes list, for New Tickets and Recent.
+  const asFilter = (f) => ({ issueTypes: typeList(f && f.issueTypes), statuses: typeList(f && f.statuses), ignoreStatuses: typeList(f && f.ignoreStatuses) });
   function savedFilter(id) {
     const s = state.settings || {};
     const f = s.tabs && s.tabs[id];
-    if (f) return { issueTypes: typeList(f.issueTypes), ignoreStatuses: typeList(f.ignoreStatuses) };
-    return { issueTypes: id === 'mine' ? [] : typeList(s.issueTypes), ignoreStatuses: [] };
+    if (f) return asFilter(f);
+    return asFilter({ issueTypes: id === 'mine' ? [] : s.issueTypes });
   }
+  const statusShown = (x, status) => (x.statuses.length ? x.statuses.includes(status) : !x.ignoreStatuses.includes(status));
   // The projects New Tickets and Recent search: the page's setting, else the ones the last refresh used.
   function trackedProjects() {
     const own = typeList(state.settings && state.settings.projects);
@@ -428,8 +433,10 @@ td.when { font-variant-numeric: tabular-nums; }
     try { localStorage.setItem('jira-dashboard-view-' + id, v); } catch (e) { /* not remembered, still filters */ }
     render();
   }
-  const usedFilter = (t) => ({ issueTypes: typeList(t && t.issueTypes), ignoreStatuses: typeList(t && t.ignoreStatuses) });
-  const sameFilter = (a, b) => sameTypes(a.issueTypes, b.issueTypes) && sameTypes(a.ignoreStatuses, b.ignoreStatuses);
+  const usedFilter = asFilter;
+  const sameFilter = (a, b) => sameTypes(a.issueTypes, b.issueTypes) && sameTypes(a.statuses, b.statuses) && sameTypes(a.ignoreStatuses, b.ignoreStatuses);
+  // A long list reads as a count; the query under the rows still names them all.
+  const fewNames = (names, noun) => (names.length > 3 ? names.length + ' ' + noun : names.join(', '));
   const CATEGORY_NAME = { new: 'To Do', indeterminate: 'In Progress', done: 'Done' };
 
   // A row is reviewed while its review exists and the ticket hasn't been updated since.
@@ -814,7 +821,8 @@ td.when { font-variant-numeric: tabular-nums; }
     const total = typeof t.total === 'number' ? t.total : fresh;
     const kids = [];
     const used = usedFilter(t);
-    const filterText = (used.issueTypes.length ? ' · only ' + used.issueTypes.join(', ') : '') + (used.ignoreStatuses.length ? ' · hiding ' + used.ignoreStatuses.join(', ') : '');
+    const filterText = (used.issueTypes.length ? ' · only ' + fewNames(used.issueTypes, 'types') : '')
+      + (used.statuses.length ? ' · only ' + fewNames(used.statuses, 'statuses') : used.ignoreStatuses.length ? ' · hiding ' + fewNames(used.ignoreStatuses, 'statuses') : '');
     if (!rows.length && tab.flags) {
       kids.push(note('Nothing flagged for discussion', 'Flag a ticket on any tab to keep it here, with a note, until you unflag it.'));
     } else if (!rows.length) {
@@ -884,7 +892,8 @@ td.when { font-variant-numeric: tabular-nums; }
     }
     if (reread) reread.disabled = pending || ui.requesting;
   }
-  const draftFilter = () => ({ issueTypes: [...ui.draft.types].sort(), ignoreStatuses: [...ui.draft.statuses].sort() });
+  // Saving always empties the older hide list, since nested objects merge on update.
+  const draftFilter = () => ({ issueTypes: [...ui.draft.types].sort(), statuses: [...ui.draft.statuses].sort(), ignoreStatuses: [] });
   const markDirty = () => { ui.dirty = !sameFilter(draftFilter(), savedFilter(ui.settingsTab)); ui.msg = ''; updateSettingsControls(); };
 
   async function requestReread() {
@@ -921,12 +930,16 @@ td.when { font-variant-numeric: tabular-nums; }
     for (const s of (state.types && Array.isArray(state.types.statuses) ? state.types.statuses : [])) if (s && typeof s.name === 'string') statusMap.set(s.name, s.category || 'To Do');
     for (const x of rowsOf(state.tabs[tabId])) if (x.status && !statusMap.has(x.status)) statusMap.set(x.status, x.statusCategory || 'To Do');
     const saved = savedFilter(tabId);
-    // A hidden status that no rows or project list show any more still appears, so it can be unticked.
-    for (const n of saved.ignoreStatuses) if (!statusMap.has(n)) statusMap.set(n, 'Other');
+    // A chosen status that no rows or project list show any more still appears, so it can be unticked.
+    for (const n of saved.statuses) if (!statusMap.has(n)) statusMap.set(n, 'Other');
     const key = JSON.stringify([tabId, types, [...statusMap], saved]);
     if (ui.dirty || key === ui.key) return updateSettingsControls();
     ui.key = key;
-    ui.draft = { types: new Set(saved.issueTypes), statuses: new Set(saved.ignoreStatuses) };
+    // A tab that still hides statuses opens with every other status ticked, unsaved, so Save switches it to a show list.
+    const legacy = !saved.statuses.length && saved.ignoreStatuses.length > 0;
+    const shown = legacy ? [...statusMap.keys()].filter((n) => !saved.ignoreStatuses.includes(n)) : saved.statuses;
+    ui.draft = { types: new Set(saved.issueTypes), statuses: new Set(shown) };
+    ui.dirty = legacy;
     // A saved type the projects no longer list still shows, so it can be unticked.
     const all = types.concat(saved.issueTypes.filter((n) => !types.some((x) => x.name === n)).map((name) => ({ name, subtask: false })));
     const box2 = $('settings-types');
@@ -938,7 +951,8 @@ td.when { font-variant-numeric: tabular-nums; }
     const intro = [
       h('h2', null, 'Tab settings'),
       picker,
-      h('p', null, 'Choose which ticket types ' + tab.label + ' includes (none chosen means every type) and which statuses it hides. ' + (state.mcp ? 'Saving also refreshes the dashboard.' : 'Changes apply when the dashboard next refreshes.')),
+      h('p', null, 'Choose which ticket types and statuses ' + tab.label + ' shows; none chosen means all of them. ' + (state.mcp ? 'Saving also refreshes the dashboard.' : 'Changes apply when the dashboard next refreshes.')),
+      legacy ? h('p', { class: 'warn' }, 'This tab hides ' + fewNames(saved.ignoreStatuses, 'statuses') + '. Every other status is ticked below: Save to show only the ticked ones from now on.') : null,
     ];
     const byName = (a, b) => a.name.localeCompare(b.name);
     const statusesIn = (cat) => [...statusMap].filter(([, c]) => c === cat).map(([n]) => n).sort((a, b) => a.localeCompare(b));
@@ -952,13 +966,13 @@ td.when { font-variant-numeric: tabular-nums; }
       const asItems = (list) => list.sort(byName).map((x) => ({ value: x.name, text: x.name }));
       sections.push(multiSelect({
         id: 'types-' + tabId, label: 'Ticket types to include', empty: 'Every type', chosen: ui.draft.types, onChange: markDirty,
-        groups: [{ label: 'Types', items: asItems(all.filter((x) => !x.subtask)) }, { label: 'Sub-tasks', items: asItems(all.filter((x) => x.subtask)) }].filter((g) => g.items.length),
+        groups: [{ label: 'Types', items: asItems(all.filter((x) => !x.subtask)), bulk: true }, { label: 'Sub-tasks', items: asItems(all.filter((x) => x.subtask)), bulk: true }].filter((g) => g.items.length),
       }));
     }
     if (statusMap.size) {
       sections.push(multiSelect({
-        id: 'status-' + tabId, label: 'Statuses to hide', empty: 'None hidden', chosen: ui.draft.statuses, onChange: markDirty,
-        groups: ['To Do', 'In Progress', 'Done', 'Other'].map((cat) => ({ label: cat, items: statusesIn(cat).map((n) => ({ value: n, text: n })) })).filter((g) => g.items.length),
+        id: 'status-' + tabId, label: 'Statuses to show', empty: 'Every status', chosen: ui.draft.statuses, onChange: markDirty,
+        groups: ['To Do', 'In Progress', 'Done', 'Other'].map((cat) => ({ label: cat, items: statusesIn(cat).map((n) => ({ value: n, text: n })), bulk: true })).filter((g) => g.items.length),
       }));
     }
     clear.addEventListener('click', () => {
@@ -968,9 +982,9 @@ td.when { font-variant-numeric: tabular-nums; }
       markDirty();
     });
     if (!sections.length) sections.push(h('p', null, 'Ticket types and statuses appear here after the next refresh.'));
-    box2.replaceChildren(...intro,
+    // Empty groups and the missing legacy note come back as null, which replaceChildren would print as text.
+    box2.replaceChildren(...intro.filter(Boolean),
       h('div', { class: 'actions' }, h('span', { class: 'msg', id: 'types-read' }), reread),
-      // Empty groups come back as null, which replaceChildren would print as text.
       ...sections.filter(Boolean),
       h('div', { class: 'actions' }, save, clear, h('span', { class: 'msg', id: 'types-msg', role: 'status' })));
     updateSettingsControls();
@@ -1143,10 +1157,11 @@ td.when { font-variant-numeric: tabular-nums; }
       const f = {};
       for (const tab of SEARCH_TABS) f[tab.id] = (opts && opts.filters && opts.filters[tab.id]) || savedFilter(tab.id);
       const clause = (x) => (x.issueTypes.length ? ' AND issuetype in (' + x.issueTypes.map(quote).join(', ') + ')' : '')
-        + (x.ignoreStatuses.length ? ' AND status not in (' + x.ignoreStatuses.map(quote).join(', ') + ')' : '');
-      // Carried rows follow the tracked projects and the tab's settings too, so a project dropped or a status hidden today drops its old rows.
+        + (x.statuses.length ? ' AND status in (' + x.statuses.map(quote).join(', ') + ')'
+          : x.ignoreStatuses.length ? ' AND status not in (' + x.ignoreStatuses.map(quote).join(', ') + ')' : '');
+      // Carried rows follow the tracked projects and the tab's settings too, so a project dropped or a status no longer shown drops its old rows.
       const allowed = (x) => (row) => projects.includes(projectOf(row))
-        && (!x.issueTypes.length || x.issueTypes.includes(row.type)) && !x.ignoreStatuses.includes(row.status);
+        && (!x.issueTypes.length || x.issueTypes.includes(row.type)) && statusShown(x, row.status);
       // Keys are quoted: some, such as CF, are JQL reserved words.
       const projectScope = 'project in (' + projects.map(quote).join(', ') + ')';
       const order = ' ORDER BY updated DESC';
@@ -1204,7 +1219,7 @@ td.when { font-variant-numeric: tabular-nums; }
       const onNew = new Set(newRows.map((x) => x.key));
       const recentFresh = freshRecent.filter((x) => !onNew.has(x.key));
       const carriedRecent = carry(rowsOf(state.tabs.recent), new Set([...onNew, ...recentFresh.map((x) => x.key)]), f.recent);
-      const meta = (id) => ({ jql: shown(id), issueTypes: f[id].issueTypes, ignoreStatuses: f[id].ignoreStatuses });
+      const meta = (id) => ({ jql: shown(id), issueTypes: f[id].issueTypes, statuses: f[id].statuses, ignoreStatuses: f[id].ignoreStatuses });
       await state.db.doc('tabs/new').set({ rows: newRows, total: totalOf(dNew, freshNew), carried: carriedNew.length, ...meta('new') });
       await state.db.doc('tabs/recent').set({ rows: recentFresh.concat(carriedRecent), total: totalOf(dRecent, freshRecent), carried: carriedRecent.length, ...meta('recent') });
       await state.db.doc('tabs/mine').set({ rows: mineRows, total: totalOf(dMine, mineRows), ...meta('mine') });
@@ -1337,7 +1352,8 @@ td.when { font-variant-numeric: tabular-nums; }
   // ---- Multi-select: chosen items as removable chips, and a panel with a filter box and the options in aligned columns ----
 
   const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  // groups: [{label, items: [{value, text, title}]}]; chosen is a Set the picker changes in place, calling onChange after.
+  // groups: [{label, items: [{value, text, title}], bulk}]; chosen is a Set the picker changes in place, calling onChange after.
+  // A bulk group has Select all, or Clear once every option the filter shows is ticked.
   function multiSelect({ id, label, empty, groups, chosen, onChange }) {
     const textOf = new Map();
     for (const g of groups) for (const it of g.items) textOf.set(it.value, it.text);
@@ -1354,12 +1370,26 @@ td.when { font-variant-numeric: tabular-nums; }
         return b;
       }) : [h('span', { class: 'msg' }, empty)]));
     }
+    let bulks = [];
     function drawList() {
       const q = filter.value.trim().toLowerCase();
+      bulks = [];
       const parts = groups.map((g) => {
         const items = g.items.filter((it) => !q || it.text.toLowerCase().includes(q));
         if (!items.length) return null;
-        return h('div', { class: 'optgroup' }, g.label ? h('div', { class: 'group-label' }, g.label) : null, h('div', { class: 'optgrid' }, items.map((it) => {
+        let head = g.label ? h('div', { class: 'group-label' }, g.label) : null;
+        if (g.bulk && g.label) {
+          const btn = h('button', { type: 'button', class: 'linkbtn', id: id + '-all-' + slug(g.label) });
+          const bulk = { btn, label: g.label, values: items.map((it) => it.value) };
+          btn.addEventListener('click', () => {
+            const all = bulk.values.every((v) => chosen.has(v));
+            for (const v of bulk.values) { if (all) chosen.delete(v); else chosen.add(v); }
+            changed();
+          });
+          bulks.push(bulk);
+          head = h('div', { class: 'optgroup-head' }, head, btn);
+        }
+        return h('div', { class: 'optgroup' }, head, h('div', { class: 'optgrid' }, items.map((it) => {
           const input = h('input', { type: 'checkbox', id: id + '-' + slug(it.value), 'data-value': it.value });
           input.checked = chosen.has(it.value);
           input.addEventListener('change', () => { if (input.checked) chosen.add(it.value); else chosen.delete(it.value); changed(); });
@@ -1367,9 +1397,17 @@ td.when { font-variant-numeric: tabular-nums; }
         })));
       }).filter(Boolean);
       list.replaceChildren(...(parts.length ? parts : [h('p', { class: 'msg' }, 'Nothing matches.')]));
+      syncBulks();
+    }
+    function syncBulks() {
+      for (const b of bulks) {
+        const all = b.values.every((v) => chosen.has(v));
+        b.btn.textContent = all ? 'Clear' : 'Select all';
+        b.btn.setAttribute('aria-label', (all ? 'Clear ' : 'Select all ') + b.label + (filter.value.trim() ? ' shown' : ''));
+      }
     }
     // Ticks change in place, so the checkbox just clicked keeps focus.
-    function sync() { list.querySelectorAll('input[type="checkbox"]').forEach((i) => { i.checked = chosen.has(i.dataset.value); }); }
+    function sync() { list.querySelectorAll('input[type="checkbox"]').forEach((i) => { i.checked = chosen.has(i.dataset.value); }); syncBulks(); }
     function changed() { drawChips(); sync(); onChange(); }
     toggle.addEventListener('click', () => {
       const open = panel.hidden;

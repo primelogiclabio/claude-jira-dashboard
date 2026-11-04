@@ -47,13 +47,13 @@ dashboard, never in Jira.
 
 Refreshes also re-read the unreviewed tickets they carry over, so a carried
 ticket shows its current status, and drops off if it moves into a status the
-tab hides or Jira no longer returns it.
+tab doesn't show or Jira no longer returns it.
 
 ### Settings
 
 - **Projects:** which projects New Tickets and Recent search.
-- **Tab settings:** for each tab, the ticket types it includes and the
-  statuses it hides.
+- **Tab settings:** for each tab, the ticket types and statuses it shows,
+  with **Select all** for each group, such as a status category.
 - **Refresh schedule:** the days and time of a scheduled refresh, if you want
   one, and **Turn off scheduled refresh** to stop it.
 - A project menu above each tab's rows shows one project at a time, and an

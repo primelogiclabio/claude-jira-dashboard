@@ -1,6 +1,6 @@
 {
   "name": "jira-dashboard",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "license": "MIT",
   "author": { "name": "prime" },
   "description": "A Claude skill that keeps a Jira dashboard on claude.ai: new, recently updated and your own tickets from your Jira site, refreshed each morning through the Atlassian connector, with a review mark that keeps unreviewed tickets as a backlog.",
