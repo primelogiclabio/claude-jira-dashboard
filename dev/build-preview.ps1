@@ -9,6 +9,11 @@ New-Item -ItemType Directory -Force -Path $out | Out-Null
 $template = Get-Content -Raw -Encoding utf8 (Join-Path $root 'template.html')
 $mock = Get-Content -Raw -Encoding utf8 (Join-Path $PSScriptRoot 'mock.js')
 
+# The page's footer names the plugin version it was built from, so the two must match.
+$plugin = (Get-Content -Raw -Encoding utf8 (Join-Path $root '.claude-plugin/plugin.json') | ConvertFrom-Json).version
+$pageVersion = [regex]::Match($template, 'id="page-version">([^<]+)<').Groups[1].Value
+if ($pageVersion -ne $plugin) { throw "template.html says version '$pageVersion' but plugin.json says '$plugin'; make them match." }
+
 function Build($name, $state, $theme) {
   $themeLine = if ($theme) { " document.documentElement.dataset.theme = '$theme';" } else { '' }
   $head = "<meta charset=`"utf-8`"><meta name=`"viewport`" content=`"width=device-width,initial-scale=1,viewport-fit=cover`">`n" +

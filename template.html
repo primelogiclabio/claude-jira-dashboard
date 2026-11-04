@@ -262,6 +262,8 @@ td.when { font-variant-numeric: tabular-nums; }
 .msg:empty { display: none; }
 .query { color: var(--muted); font-size: 0.82rem; overflow-wrap: anywhere; }
 .query code { font-family: var(--font-mono); font-size: 0.78rem; }
+.foot { color: var(--muted); font-size: 0.8rem; }
+.foot code { font-family: var(--font-mono); font-size: 0.76rem; }
 
 @media (max-width: 860px) {
   h1 { font-size: 1.45rem; }
@@ -336,6 +338,8 @@ td.when { font-variant-numeric: tabular-nums; }
       <section class="sub" id="settings-types"></section>
     </div>
   </details>
+  <!-- The plugin version this page was built from; dev/build-preview.ps1 checks it matches .claude-plugin/plugin.json. -->
+  <footer class="foot">jira-dashboard <code id="page-version">0.7.1</code></footer>
 </div>
 
 <script>
