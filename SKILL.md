@@ -15,7 +15,7 @@ On New Tickets and Recent the user marks each ticket reviewed. A ticket they hav
 
 On any tab the user can flag a ticket to bring up with others, with an optional short note. Flags live only in the dashboard's database, never in Jira, and no refresh changes them.
 
-The page is built from `template.html` in this skill's folder. Its rows aren't in the page's code: they're in the artifact's own database, which the page shows live and Claude writes with the `ArtifactData` tool.
+The page is built from `template.html` in this skill's folder, a complete HTML page. Its rows aren't in the page's code: they're in the artifact's own database, which the page shows live and Claude writes with the artifact tools (below).
 
 A refresh happens three ways, all following the same rules:
 - the scheduled task runs this skill on the refresh schedule, if the user set one up (there's none by default);
@@ -37,12 +37,27 @@ These values are fixed for now; later they become plugin options. The page keeps
 ## What it needs
 
 - **The Atlassian connector**, Atlassian's own MCP server, set up on the user's account. Its tool names carry a per-account prefix (`mcp__<id>__searchJiraIssuesUsingJql`), so look for the tool by its last part. If `searchJiraIssuesUsingJql` isn't there, write nothing: say the dashboard needs the Atlassian connector and that it's added under **Settings › Connectors** on claude.ai. In a scheduled run there's no one to ask, so stop there.
-- **The `Artifact` and `ArtifactData` tools**, which Claude Code sessions have. Chat artifacts on claude.ai have no database: without these tools, say the dashboard is refreshed from Claude Code, and change nothing.
+- **Artifact tools with a database**, which Claude Code sessions have: either set in Artifact tools, below. Chat artifacts on claude.ai have no database: without either set, say the dashboard is refreshed from Claude Code, and change nothing.
 - **The desktop app's scheduled-tasks tools** (`create_scheduled_task`, `update_scheduled_task`, `delete_scheduled_task`, `list_scheduled_tasks`) for the scheduled refresh. Without them, refresh anyway and leave the schedule as it is.
+
+## Artifact tools
+
+A session has one of two sets of artifact tools: `Artifact` and `ArtifactData`, or the claude-artifacts server's tools (`list_artifacts`, `read_artifact`, `publish_files` and the `db_` tools, whose names may carry a prefix). The steps below name the operation; this is how each one is done:
+
+| Operation | `Artifact` / `ArtifactData` | claude-artifacts |
+|---|---|---|
+| Find the dashboard | `Artifact` `list` | `list_artifacts` with `query` "Jira Dashboard" |
+| Read the page | `Artifact` `read` | `read_artifact`; `get_artifact` gives its live version |
+| Publish a new page | `Artifact` publish with `title`, `icon`, `description` and `capabilities` | `publish_files` with `title` and `icon`, then `read_declaration` and `declare_capabilities` with the same capabilities |
+| Republish the page | `Artifact` publish to the dashboard's `url`, after a read | `get_artifact` and `list_files`, then `publish_files` with `slug` and `base_version` |
+| Read a document or a collection | `ArtifactData` `get` (`collection`, `doc_id`) or `list` (`collection`) | `db_get` (`path`, such as `tabs/new`) or `db_list` (`collection`) |
+| Write in one batch | `ArtifactData` `batch`, up to 50 `writes`, each with `if_version` | one `db_write` with up to 50 `ops`, each with `ifVersion`; all or none apply. Its `update` fails on a missing document: use `set`, or `merge` to add fields |
+
+Either way, pin every write to an existing document to the `version` last read, and remove a field by writing it as `{"__delete__": true}` in an update or merge.
 
 ## Finding the dashboard
 
-The dashboard is the artifact the user points at, by link or by name ("my Jira dashboard"), or the one already in play in the conversation. Otherwise, list the user's artifacts (`Artifact` `list`) and take the one titled **Jira Dashboard**. If there's more than one, ask which. If there's none and the user asks for one, start one (below). A scheduled run that finds none stops without creating one.
+The dashboard is the artifact the user points at, by link or by name ("my Jira dashboard"), or the one already in play in the conversation. Otherwise, find it among the user's artifacts (Artifact tools, above) and take the one titled **Jira Dashboard**. If there's more than one, ask which. If there's none and the user asks for one, start one (below). A scheduled run that finds none stops without creating one.
 
 ## The data
 
@@ -108,7 +123,7 @@ A tab is one document, not one per ticket, because a batch takes at most 50 writ
    - Drop carried rows whose project isn't tracked any more (the key's prefix gives the project), or whose type or status the tab's settings now leave out, so a project removed, a status no longer shown, or a ticket moved into a status the tab doesn't show clears its row too.
    - Order carried rows newest `seen` first, and keep at most the carried-over cap per tab.
    - Write each tab's `jql` for display with the window start as an absolute local date, `"yyyy-MM-dd HH:mm"` in place of `-<N>m`. Don't build Jira search links: the page shows the query as text only.
-6. **Write**, in one `ArtifactData` `batch` on the dashboard's `url`:
+6. **Write**, in one batch on the dashboard (Artifact tools, above):
    - `set` `tabs/new` and `tabs/recent` with `rows`, `total`, `carried`, `jql`, `issueTypes`, `statuses` and `ignoreStatuses`
    - `set` `tabs/mine` with `rows`, `total`, `jql`, `issueTypes`, `statuses` and `ignoreStatuses`
    - unless the recheck failed: `set` `tabs/flagged` with `rows`, each flagged ticket's current row (from the searches or the recheck, without `seen` or `carried`), and `at` (now)
@@ -192,17 +207,17 @@ The page shows:
   - **Refresh schedule:** the schedule the task runs on, or "No scheduled refresh" with no days ticked and no time; day checkboxes and a time, and Save schedule; **Turn off scheduled refresh** (or **Clear schedule** when one is saved but not set up yet), which saves `null`, with **Keep it** to undo. A saved change or turn-off shows as waiting until the user asks Claude to apply it.
   - **Projects:** a picker over every project from `lists/projects`, the tracked ones chosen, and Save projects (which also refreshes, reading the new projects' types and statuses first). Until the list is read, only the tracked projects show, with a button to load it.
   - **Tab settings:** a tab picker, then pickers for that tab's ticket types (types and sub-tasks) and statuses to show (by category), Save (which also refreshes), Clear all, when the types and statuses were read, and **Re-read types and statuses**. A tab that still has an older hide list opens with every other status ticked and a note that Save switches it to showing the ticked ones.
-- **Footer:** "jira-dashboard" and the plugin version the page was built from, so the user can tell which page is published. It's in `template.html` (`id="page-version"`) and must match `.claude-plugin/plugin.json`; `dev/build-preview.ps1` stops if they differ. When asked which version a dashboard runs, read the page with `Artifact` `read` and give that footer's version.
+- **Footer:** "jira-dashboard" and the plugin version the page was built from, so the user can tell which page is published. It's in `template.html` (`id="page-version"`) and must match `.claude-plugin/plugin.json`; `dev/build-preview.ps1` stops if they differ. When asked which version a dashboard runs, read the page and give that footer's version.
 
 The page's own refresh follows the same Refreshing steps, except that it can't change the scheduled task, writes the three tabs, `tabs/flagged` and then `refresh/main` (`at` and `since` only) one at a time since a page has no batch, and leaves deleting old reviews to Claude's refreshes. Like Claude's, it never changes flags. It reads `site` from `refresh/main`, and the tracked projects from `settings/main.projects` or else `refresh/main.projects`, so a dashboard needs one refresh by Claude before the page's **Refresh** works. When the tracked projects differ from `types/main.projects`, it reads the types, statuses and project list first. Where the page can't use the connector (not allowed, not set up, or opened outside claude.ai), it says so and the button stays a way to try again.
 
 ## Starting one
 
-1. Copy `template.html` from this skill's folder into the session's scratchpad (or the working directory) as `jira-dashboard.html`. Change nothing in it unless the user asked for a change.
-2. Publish it with the `Artifact` tool:
+1. Copy `template.html` from this skill's folder into the session's scratchpad (or the working directory) as `jira-dashboard.html`. It's a complete page, ready to publish: change nothing in it unless the user asked for a change.
+2. Publish it as a new page (Artifact tools, above):
    - `title`: `Jira Dashboard`
    - `icon`: `dashboard`
-   - `description`: "New, recently updated and my own Jira tickets, with a review backlog."
+   - `description`, where the tool takes one: "New, recently updated and my own Jira tickets, with a review backlog."
    - `capabilities`: `{"db": {"rules": [{"path": "", "read": "admin", "write": "admin"}]}, "mcp": {"servers": [{"server": "Atlassian MCP", "tools": ["searchJiraIssuesUsingJql", "executeRead"]}]}}`
 
    The `db` rule keeps the rows to the owner and anyone they make an Editor, even if the page is shared. The `mcp` entry lets the page query Jira through the viewer's own Atlassian connector; claude.ai asks the viewer to allow it the first time. `server` is the connector's name on the user's claude.ai account, which may differ on another account.
@@ -215,6 +230,6 @@ The page's own refresh follows the same Refreshing steps, except that it can't c
 ## Changing the page itself
 
 Only when the user asks for a feature or a look the page doesn't have:
-1. Read the current page with `Artifact` `read`, edit the saved file, and publish it to the same `url`.
-2. Omit `capabilities` so the database rules and connector access carry over.
+1. Read the current page, make the change in a copy of it (or in `template.html`, when working in this skill's repo), and republish it to the same dashboard (Artifact tools, above).
+2. Leave the capabilities as they are, so the database rules and connector access carry over: with `Artifact`, omit `capabilities`; the claude-artifacts tools keep the declaration on a republish.
 3. Keep the data fields above, so existing rows still show.
