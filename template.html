@@ -194,7 +194,19 @@ th {
   color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap;
 }
 td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
-tbody tr:last-child td { border-bottom: 0; }
+tbody:last-child tr:last-child td, tbody:last-child tr:last-child th { border-bottom: 0; }
+tr.grouphead th { padding: 0; background: color-mix(in srgb, var(--bg) 55%, var(--surface)); }
+.grouptoggle {
+  appearance: none; border: 0; background: none; cursor: pointer; width: 100%;
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; text-align: left;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--ink);
+}
+.grouptoggle .gcount { color: var(--muted); font-family: var(--font-mono); font-weight: 500; letter-spacing: 0; text-transform: none; }
+.grouptoggle .chev { flex: none; width: 0; height: 0; border-left: 5px solid var(--muted); border-block: 4px solid transparent; transition: transform 0.15s; }
+.grouptoggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.grouptoggle:hover .chev { border-left-color: var(--ink); }
+.grouptoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { .grouptoggle .chev { transition: none; } }
 td.key { white-space: nowrap; }
 td.key a { font-family: var(--font-mono); font-size: 0.86rem; color: var(--accent); text-decoration: none; }
 td.key a:hover { text-decoration: underline; }
@@ -278,6 +290,10 @@ td.when { font-variant-numeric: tabular-nums; }
     background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
   }
   td { padding: 0; border: 0; }
+  table.grouped { display: grid; gap: 14px; }
+  tbody tr.grouphead { display: block; background: none; border: 0; border-radius: 0; padding: 0; }
+  tr.grouphead th { display: block; background: none; border: 0; }
+  .grouptoggle { padding: 2px 0; }
   td.key { grid-area: key; }
   td.status { grid-area: status; justify-self: end; }
   td.sum { grid-area: sum; min-width: 0; }
@@ -339,7 +355,7 @@ td.when { font-variant-numeric: tabular-nums; }
     </div>
   </details>
   <!-- The plugin version this page was built from; dev/build-preview.ps1 checks it matches .claude-plugin/plugin.json. -->
-  <footer class="foot">jira-dashboard <code id="page-version">0.7.1</code></footer>
+  <footer class="foot">jira-dashboard <code id="page-version">0.8.0</code></footer>
 </div>
 
 <script>
@@ -370,7 +386,7 @@ td.when { font-variant-numeric: tabular-nums; }
   // One-off re-reads of flagged tickets: the ones running, and the ones Jira didn't return.
   const rechecking = { keys: new Set(), missing: new Set() };
   // The settings form keeps its own draft so live updates never undo unsaved ticks.
-  const ui = { views: {}, proj: { draft: new Set(), dirty: false, saving: false, msg: '', key: '' }, settingsTab: 'new', draft: { types: new Set(), statuses: new Set() }, dirty: false, saving: false, requesting: false, msg: '', key: '',
+  const ui = { views: {}, layouts: {}, collapsed: {}, proj: { draft: new Set(), dirty: false, saving: false, msg: '', key: '' }, settingsTab: 'new', draft: { types: new Set(), statuses: new Set() }, dirty: false, saving: false, requesting: false, msg: '', key: '',
     sched: { days: new Set(), time: '' }, schedDirty: false, schedSaving: false, schedMsg: '', schedKey: '' };
 
   const $ = (id) => document.getElementById(id);
@@ -436,6 +452,34 @@ td.when { font-variant-numeric: tabular-nums; }
     ui.views[id] = v;
     try { localStorage.setItem('jira-dashboard-view-' + id, v); } catch (e) { /* not remembered, still filters */ }
     render();
+  }
+  // List or By type, and the type sections collapsed: per tab and per device too, in browser storage.
+  const LAYOUTS = [{ id: 'list', label: 'List' }, { id: 'type', label: 'By type' }];
+  function layoutOf(id) {
+    if (ui.layouts[id]) return ui.layouts[id];
+    let v = 'list';
+    try { v = localStorage.getItem('jira-dashboard-layout-' + id) === 'type' ? 'type' : 'list'; } catch (e) { /* storage blocked: a list */ }
+    return (ui.layouts[id] = v);
+  }
+  function setLayout(id, v) {
+    ui.layouts[id] = v;
+    try { localStorage.setItem('jira-dashboard-layout-' + id, v); } catch (e) { /* not remembered, still switches */ }
+  }
+  function collapsedOf(id) {
+    if (ui.collapsed[id]) return ui.collapsed[id];
+    let list = [];
+    try { list = typeList(JSON.parse(localStorage.getItem('jira-dashboard-collapsed-' + id) || '[]')); } catch (e) { /* storage blocked or unreadable: all open */ }
+    return (ui.collapsed[id] = new Set(list));
+  }
+  function setCollapsed(id, set) {
+    ui.collapsed[id] = set;
+    try { localStorage.setItem('jira-dashboard-collapsed-' + id, JSON.stringify([...set])); } catch (e) { /* not remembered, still collapses */ }
+  }
+  // A click redraws the panel, so the button clicked gets focus back.
+  function renderKeepFocus(id) {
+    render();
+    const el = $(id);
+    if (el) el.focus();
   }
   const usedFilter = asFilter;
   const sameFilter = (a, b) => sameTypes(a.issueTypes, b.issueTypes) && sameTypes(a.statuses, b.statuses) && sameTypes(a.ignoreStatuses, b.ignoreStatuses);
@@ -847,7 +891,33 @@ td.when { font-variant-numeric: tabular-nums; }
         picker = h('label', { class: 'viewpick' }, sel);
       }
       const more = total > fresh ? h('span', { class: 'more' }, fresh + ' of ' + total + ' shown') : null;
-      const left = h('span', { class: 'actions' }, picker, h('span', null, tab.flags ? 'Most recently flagged first' : 'Most recently updated first', filterText, view === 'all' ? '' : ' · ' + shownRows.length + ' of ' + rows.length + ' rows'));
+      // By type: one section per ticket type, A to Z, with "No type" last; each keeps the list's order.
+      const layout = layoutOf(tab.id);
+      const layoutPick = h('span', { class: 'theme', role: 'group', 'aria-label': 'Layout' }, LAYOUTS.map((x) => {
+        const b = h('button', { type: 'button', id: 'layout-' + tab.id + '-' + x.id, 'aria-pressed': String(x.id === layout) }, x.label);
+        b.addEventListener('click', () => { setLayout(tab.id, x.id); renderKeepFocus(b.id); });
+        return b;
+      }));
+      const groups = new Map();
+      for (const x of shownRows) {
+        const k = x.type || '';
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(x);
+      }
+      const types = [...groups.keys()].sort((a, b) => (!a) - (!b) || a.localeCompare(b));
+      const collapsed = collapsedOf(tab.id);
+      let foldAll = null;
+      if (layout === 'type' && types.length) {
+        const allShut = types.every((k) => collapsed.has(k));
+        foldAll = h('button', { type: 'button', class: 'linkbtn', id: 'fold-all-' + tab.id }, allShut ? 'Expand all' : 'Collapse all');
+        foldAll.addEventListener('click', () => {
+          const s = new Set(collapsed);
+          for (const k of types) { if (allShut) s.delete(k); else s.add(k); }
+          setCollapsed(tab.id, s);
+          renderKeepFocus(foldAll.id);
+        });
+      }
+      const left = h('span', { class: 'actions' }, picker, layoutPick, foldAll, h('span', null, tab.flags ? 'Most recently flagged first' : 'Most recently updated first', filterText, view === 'all' ? '' : ' · ' + shownRows.length + ' of ' + rows.length + ' rows'));
       const tools = [];
       if (tab.review && shownRows.some((x) => !isReviewed(x))) {
         const all = h('button', { type: 'button', class: 'btn', id: 'mark-all-' + tab.id }, view === 'all' ? 'Mark all reviewed' : 'Mark all ' + view + ' reviewed');
@@ -860,9 +930,27 @@ td.when { font-variant-numeric: tabular-nums; }
       if (!shownRows.length) {
         kids.push(note('No ' + view + ' tickets on this tab', 'Choose All projects to see the rest.'));
       } else {
-        kids.push(h('div', { class: 'tablewrap' }, h('table', null,
-          h('thead', null, h('tr', null, ['Key', 'Summary', 'Type', 'Status', 'Assignee', tab.flags ? 'Flagged' : tab.id === 'new' ? 'Created' : 'Updated'].map((c) => h('th', { scope: 'col' }, c)))),
-          h('tbody', null, shownRows.map((x) => row(x, tab)))
+        const cols = ['Key', 'Summary', 'Type', 'Status', 'Assignee', tab.flags ? 'Flagged' : tab.id === 'new' ? 'Created' : 'Updated'];
+        // A collapsed section keeps only its heading row.
+        const bodies = layout === 'type' ? types.map((k) => {
+          const list = groups.get(k);
+          const open = !collapsed.has(k);
+          const id = 'group-' + tab.id + '-' + slug(k || 'none');
+          const due = tab.review ? list.filter((x) => !isReviewed(x)).length : 0;
+          const btn = h('button', { type: 'button', class: 'grouptoggle', id, 'aria-expanded': String(open) },
+            h('span', { class: 'chev', 'aria-hidden': 'true' }), h('span', null, k || 'No type'),
+            h('span', { class: 'gcount' }, list.length + (due ? ' · ' + due + ' to review' : '')));
+          btn.addEventListener('click', () => {
+            const s = new Set(collapsed);
+            if (open) s.add(k); else s.delete(k);
+            setCollapsed(tab.id, s);
+            renderKeepFocus(id);
+          });
+          return h('tbody', { class: 'group' }, h('tr', { class: 'grouphead' }, h('th', { colspan: String(cols.length), scope: 'rowgroup' }, btn)), open ? list.map((x) => row(x, tab)) : null);
+        }) : [h('tbody', null, shownRows.map((x) => row(x, tab)))];
+        kids.push(h('div', { class: 'tablewrap' }, h('table', { class: layout === 'type' ? 'grouped' : null },
+          h('thead', null, h('tr', null, cols.map((c) => h('th', { scope: 'col' }, c)))),
+          bodies
         )));
       }
     }
