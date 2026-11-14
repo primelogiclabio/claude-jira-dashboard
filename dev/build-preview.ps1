@@ -1,7 +1,8 @@
 # Builds local previews of template.html with the made-up data in mock.js, one file per state, into dev/out/.
 # Open them in a browser (or Claude's browser pane); outside claude.ai there is no real database or connector.
-# Each file is plain ASCII with the viewport meta the claude.ai publish skeleton would add, because the
-# browser pane opens local files as static snapshots that drop the query string and mangle non-ASCII text.
+# The mock goes in just before the template's </head>, so it's ready before the page's own script runs.
+# Each file is plain ASCII, because the browser pane opens local files as static snapshots that drop the
+# query string and mangle non-ASCII text.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $PSScriptRoot 'out'
@@ -13,12 +14,14 @@ $mock = Get-Content -Raw -Encoding utf8 (Join-Path $PSScriptRoot 'mock.js')
 $plugin = (Get-Content -Raw -Encoding utf8 (Join-Path $root '.claude-plugin/plugin.json') | ConvertFrom-Json).version
 $pageVersion = [regex]::Match($template, 'id="page-version">([^<]+)<').Groups[1].Value
 if ($pageVersion -ne $plugin) { throw "template.html says version '$pageVersion' but plugin.json says '$plugin'; make them match." }
+# The template is a whole page, which is what the publish tools need.
+$headEnd = $template.IndexOf('</head>')
+if (-not $template.StartsWith('<!DOCTYPE html>') -or $headEnd -lt 0) { throw "template.html must be a whole page: <!DOCTYPE html> first, and a <head>." }
 
 function Build($name, $state, $theme) {
   $themeLine = if ($theme) { " document.documentElement.dataset.theme = '$theme';" } else { '' }
-  $head = "<meta charset=`"utf-8`"><meta name=`"viewport`" content=`"width=device-width,initial-scale=1,viewport-fit=cover`">`n" +
-    "<script>window.__previewState = '$state';$themeLine</script>`n<script>`n"
-  $all = $head + $mock + "</script>`n" + $template
+  $scripts = "<script>window.__previewState = '$state';$themeLine</script>`n<script>`n" + $mock + "</script>`n"
+  $all = $template.Insert($headEnd, $scripts)
   $sb = New-Object System.Text.StringBuilder
   foreach ($c in $all.ToCharArray()) {
     if ([int]$c -gt 127) { [void]$sb.Append(('\u{0:x4}' -f [int]$c)) } else { [void]$sb.Append($c) }
