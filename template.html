@@ -215,6 +215,18 @@ tr.grouphead th { padding: 0; background: color-mix(in srgb, var(--bg) 55%, var(
 .grouptoggle:hover .chev { border-left-color: var(--ink); }
 .grouptoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
 @media (prefers-reduced-motion: reduce) { .grouptoggle .chev { transition: none; } }
+.sorthead {
+  appearance: none; border: 0; background: none; padding: 0; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
+}
+.sorthead:hover, th[aria-sort] .sorthead { color: var(--ink); }
+.sorthead:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+/* A triangle drawn with borders: up for A to Z or oldest first, down for the reverse; it keeps its width unsorted. */
+.sortmark { flex: none; width: 0; height: 0; border-inline: 4px solid transparent; }
+.sortmark.asc { border-bottom: 5px solid currentColor; }
+.sortmark.desc { border-top: 5px solid currentColor; }
+.sorthead:hover .sortmark:not(.asc):not(.desc) { border-bottom: 5px solid currentColor; opacity: 0.35; }
 td.key { white-space: nowrap; }
 td.key a { font-family: var(--font-mono); font-size: 0.86rem; color: var(--accent); text-decoration: none; }
 td.key a:hover { text-decoration: underline; }
@@ -290,7 +302,11 @@ td.when { font-variant-numeric: tabular-nums; }
   .side { align-items: flex-start; }
   .tablewrap { background: none; border: 0; border-radius: 0; overflow: visible; }
   table, tbody { display: block; }
-  thead { display: none; }
+  /* No column headings over the cards: they become a row of sort buttons above them. */
+  thead { display: block; margin-bottom: 8px; }
+  thead tr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+  thead tr::before { content: 'Sort by'; color: var(--muted); font-size: 0.86rem; }
+  thead th { padding: 0; border: 0; }
   tbody { display: grid; gap: 8px; }
   tbody tr {
     display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px 10px;
@@ -299,6 +315,7 @@ td.when { font-variant-numeric: tabular-nums; }
   }
   td { padding: 0; border: 0; }
   table.grouped { display: grid; gap: 14px; }
+  table.grouped thead { margin-bottom: 0; }
   tbody tr.grouphead { display: block; background: none; border: 0; border-radius: 0; padding: 0; }
   tr.grouphead th { display: block; background: none; border: 0; }
   .grouptoggle { padding: 2px 0; }
@@ -365,7 +382,7 @@ td.when { font-variant-numeric: tabular-nums; }
     </div>
   </details>
   <!-- The plugin version this page was built from; dev/build-preview.ps1 checks it matches .claude-plugin/plugin.json. -->
-  <footer class="foot">jira-dashboard <code id="page-version">0.8.2</code></footer>
+  <footer class="foot">jira-dashboard <code id="page-version">0.9.0</code></footer>
 </div>
 
 <script>
@@ -396,7 +413,7 @@ td.when { font-variant-numeric: tabular-nums; }
   // One-off re-reads of flagged tickets: the ones running, and the ones Jira didn't return.
   const rechecking = { keys: new Set(), missing: new Set() };
   // The settings form keeps its own draft so live updates never undo unsaved ticks.
-  const ui = { views: {}, layouts: {}, collapsed: {}, proj: { draft: new Set(), dirty: false, saving: false, msg: '', key: '' }, settingsTab: 'new', draft: { types: new Set(), statuses: new Set() }, dirty: false, saving: false, requesting: false, msg: '', key: '',
+  const ui = { views: {}, layouts: {}, collapsed: {}, sorts: {}, whos: {}, proj: { draft: new Set(), dirty: false, saving: false, msg: '', key: '' }, settingsTab: 'new', draft: { types: new Set(), statuses: new Set() }, dirty: false, saving: false, requesting: false, msg: '', key: '',
     sched: { days: new Set(), time: '' }, schedDirty: false, schedSaving: false, schedMsg: '', schedKey: '' };
 
   const $ = (id) => document.getElementById(id);
@@ -485,6 +502,38 @@ td.when { font-variant-numeric: tabular-nums; }
     ui.collapsed[id] = set;
     try { localStorage.setItem('jira-dashboard-collapsed-' + id, JSON.stringify([...set])); } catch (e) { /* not remembered, still collapses */ }
   }
+  // The column sort, {col, dir}, or null for the tab's default order: per tab and per device too.
+  const SORT_COLS = ['key', 'summary', 'type', 'status', 'assignee', 'when'];
+  function sortOf(id) {
+    if (id in ui.sorts) return ui.sorts[id];
+    let s = null;
+    try {
+      const m = /^([a-z]+):(asc|desc)$/.exec(localStorage.getItem('jira-dashboard-sort-' + id) || '');
+      if (m && SORT_COLS.includes(m[1])) s = { col: m[1], dir: m[2] };
+    } catch (e) { /* storage blocked: the default order */ }
+    return (ui.sorts[id] = s);
+  }
+  function setSort(id, s) {
+    ui.sorts[id] = s;
+    try {
+      if (s) localStorage.setItem('jira-dashboard-sort-' + id, s.col + ':' + s.dir);
+      else localStorage.removeItem('jira-dashboard-sort-' + id);
+    } catch (e) { /* not remembered, still sorts */ }
+  }
+  // Each tab's assignee view, like the project view: a display name, Unassigned, or everyone.
+  const EVERYONE = ':all', NO_ONE = ':none';
+  const whoValue = (row) => (row && typeof row.assignee === 'string' && row.assignee.trim() ? row.assignee : NO_ONE);
+  function whoOf(id) {
+    if (ui.whos[id]) return ui.whos[id];
+    let v = EVERYONE;
+    try { v = localStorage.getItem('jira-dashboard-assignee-' + id) || EVERYONE; } catch (e) { /* storage blocked: everyone */ }
+    return (ui.whos[id] = v);
+  }
+  function setWho(id, v) {
+    ui.whos[id] = v;
+    try { localStorage.setItem('jira-dashboard-assignee-' + id, v); } catch (e) { /* not remembered, still filters */ }
+    render();
+  }
   // A click redraws the panel, so the button clicked gets focus back.
   function renderKeepFocus(id) {
     render();
@@ -507,6 +556,49 @@ td.when { font-variant-numeric: tabular-nums; }
   const rowsOf = (t) => (t && Array.isArray(t.rows) ? t.rows : []);
   const toReview = (t) => rowsOf(t).filter((r) => !isReviewed(r)).length;
   const keyOk = (k) => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,100}$/.test(k);
+
+  // Sorting by a column. The date column is the one the tab shows: created, updated or flagged.
+  const whenOf = (tab, row) => (tab.flags ? row.flaggedAt : tab.id === 'new' ? row.created : row.updated);
+  const whenLabel = (tab) => (tab.flags ? 'Flagged' : tab.id === 'new' ? 'Created' : 'Updated');
+  const COLUMNS = (tab) => [['key', 'Key'], ['summary', 'Summary'], ['type', 'Type'], ['status', 'Status'], ['assignee', 'Assignee'], ['when', whenLabel(tab)]];
+  // Numeric, so APP-12 comes before APP-100; case and accents don't split names apart.
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  const CATEGORY_RANK = { todo: 0, progress: 1, done: 2 };
+  const textOf = (v) => (typeof v === 'string' ? v.trim() : '');
+  // A row's value for a column; null (no value) sorts last both ways.
+  function sortValue(col, tab, row) {
+    if (col === 'when') { const d = toDate(whenOf(tab, row)); return d ? d.getTime() : null; }
+    // Status sorts by its category, To Do, In Progress, then Done, and by name within one.
+    if (col === 'status') return textOf(row.status) ? CATEGORY_RANK[CATEGORY[row.statusCategory] || 'todo'] + ' ' + textOf(row.status) : null;
+    return textOf(row[col]) || null;
+  }
+  function sortRows(tab, rows, s) {
+    const dir = s.dir === 'desc' ? -1 : 1;
+    return rows.map((row, i) => ({ row, i, v: sortValue(s.col, tab, row) }))
+      .sort((a, b) => (a.v === null) - (b.v === null)
+        || (a.v === null ? 0 : dir * (typeof a.v === 'number' ? a.v - b.v : collator.compare(a.v, b.v)))
+        || a.i - b.i)
+      .map((x) => x.row);
+  }
+  // With no sort, rows keep the refresh's order, except New Tickets, which lists this window's tickets newest
+  // created first (tabs saved before its query was ordered by created were in update order), carried ones after.
+  function defaultOrder(tab, rows) {
+    if (tab.id !== 'new') return rows;
+    return sortRows(tab, rows.filter((x) => !x.carried), { col: 'when', dir: 'desc' }).concat(rows.filter((x) => x.carried));
+  }
+  // A header click sorts A to Z (the date newest first), a second reverses, a third goes back to the default order.
+  function nextSort(s, col) {
+    const first = col === 'when' ? 'desc' : 'asc';
+    if (!s || s.col !== col) return { col, dir: first };
+    return s.dir === first ? { col, dir: first === 'asc' ? 'desc' : 'asc' } : null;
+  }
+  function orderText(tab, s) {
+    if (!s) return tab.flags ? 'Most recently flagged first' : tab.id === 'new' ? 'Most recently created first' : 'Most recently updated first';
+    const label = COLUMNS(tab).find(([c]) => c === s.col)[1];
+    const asc = s.dir === 'asc';
+    const how = s.col === 'when' ? (asc ? 'oldest first' : 'newest first') : s.col === 'status' ? (asc ? 'To Do first' : 'Done first') : (asc ? 'A to Z' : 'Z to A');
+    return 'Sorted by ' + label + ', ' + how;
+  }
 
   // A flag keeps a copy of the row from when it was set. The Flagged tab shows the freshest copy: the search tabs'
   // or tabs/flagged's row with the latest update (refreshes re-read flagged tickets), else the flag's own copy (stale: true).
@@ -886,11 +978,29 @@ td.when { font-variant-numeric: tabular-nums; }
     } else if (!rows.length) {
       kids.push(note(tab.id === 'mine' ? tab.empty : tab.empty + ' since ' + dayTime(r.since), filterText ? 'Filtered in Settings' + filterText + '.' : ''));
     } else {
-      // The project view only narrows what's shown; the tab still holds every row.
+      // The project and assignee views only narrow what's shown, and a sort only orders it; the tab still holds every row.
       const inRows = [...new Set(rows.map(projectOf).filter(Boolean))].sort();
       let view = viewOf(tab.id);
       if (view !== 'all' && !inRows.includes(view) && !trackedProjects().includes(view)) view = 'all';
-      const shownRows = view === 'all' ? rows : rows.filter((x) => projectOf(x) === view);
+      const inView = view === 'all' ? rows : rows.filter((x) => projectOf(x) === view);
+      // A remembered assignee stays chosen while they have no rows here, like a tracked project with none.
+      const who = whoOf(tab.id);
+      const peopleIn = [...new Set(inView.map(whoValue))];
+      const people = [...new Set(peopleIn.concat(who === EVERYONE ? [] : [who]))].sort((a, b) => (a === NO_ONE) - (b === NO_ONE) || collator.compare(a, b));
+      let whoPick = null;
+      if (peopleIn.length > 1 || who !== EVERYONE) {
+        const sel = h('select', { id: 'who-' + tab.id, 'aria-label': 'Show assignee' },
+          h('option', { value: EVERYONE }, 'All assignees'),
+          people.map((v) => h('option', { value: v }, v === NO_ONE ? 'Unassigned' : v)));
+        sel.value = who;
+        sel.addEventListener('change', () => setWho(tab.id, sel.value));
+        whoPick = h('label', { class: 'viewpick' }, sel);
+      }
+      const sort = sortOf(tab.id);
+      const narrowed = who === EVERYONE ? inView : inView.filter((x) => whoValue(x) === who);
+      // Rows that tie on the sorted column keep the default order among themselves.
+      const shownRows = sort ? sortRows(tab, defaultOrder(tab, narrowed), sort) : defaultOrder(tab, narrowed);
+      const filtered = view !== 'all' || who !== EVERYONE;
       let picker = null;
       if (inRows.length > 1 || view !== 'all') {
         const sel = h('select', { id: 'view-' + tab.id, 'aria-label': 'Show project' },
@@ -901,7 +1011,7 @@ td.when { font-variant-numeric: tabular-nums; }
         picker = h('label', { class: 'viewpick' }, sel);
       }
       const more = total > fresh ? h('span', { class: 'more' }, fresh + ' of ' + total + ' shown') : null;
-      // By type: one section per ticket type, A to Z, with "No type" last; each keeps the list's order.
+      // By type: one section per ticket type, A to Z, with "No type" last; each keeps the list's order, sorted or not.
       const layout = layoutOf(tab.id);
       const layoutPick = h('span', { class: 'theme', role: 'group', 'aria-label': 'Layout' }, LAYOUTS.map((x) => {
         const b = h('button', { type: 'button', id: 'layout-' + tab.id + '-' + x.id, 'aria-pressed': String(x.id === layout) }, x.label);
@@ -927,14 +1037,22 @@ td.when { font-variant-numeric: tabular-nums; }
           renderKeepFocus(foldAll.id);
         });
       }
-      const left = h('span', { class: 'actions' }, picker, layoutPick, foldAll, h('span', null, tab.flags ? 'Most recently flagged first' : 'Most recently updated first', filterText, view === 'all' ? '' : ' · ' + shownRows.length + ' of ' + rows.length + ' rows'));
+      let unsort = null;
+      if (sort) {
+        unsort = h('button', { type: 'button', class: 'linkbtn', id: 'sort-reset-' + tab.id }, 'Default order');
+        unsort.addEventListener('click', () => { setSort(tab.id, null); renderKeepFocus('sort-' + tab.id + '-' + sort.col); });
+      }
+      const left = h('span', { class: 'actions' }, picker, whoPick, layoutPick, foldAll,
+        h('span', null, orderText(tab, sort), filterText, filtered ? ' · ' + shownRows.length + ' of ' + rows.length + ' rows' : ''), unsort);
       const tools = [];
       if (tab.review && shownRows.some((x) => !isReviewed(x))) {
         const n = shownRows.filter((x) => !isReviewed(x) && keyOk(x.key)).length;
-        const tip = 'Ticks Reviewed on ' + (n === 1 ? 'the 1 unreviewed ' : 'all ' + n + ' unreviewed ') + (view === 'all' ? '' : view + ' ') + (n === 1 ? 'ticket' : 'tickets')
+        const tip = 'Ticks Reviewed on ' + (n === 1 ? 'the 1 unreviewed ' : 'all ' + n + ' unreviewed ') + (who === NO_ONE ? 'unassigned ' : '')
+          + (view === 'all' ? '' : view + ' ') + (n === 1 ? 'ticket' : 'tickets') + (who === EVERYONE || who === NO_ONE ? '' : ' assigned to ' + who)
           + ' on this tab, collapsed sections included. Reviewed tickets leave the tab at the next refresh'
           + (tab.id === 'recent' ? ' and come back if they change again.' : '; one that changes later shows on Recent.');
-        const all = h('button', { type: 'button', class: 'btn', id: 'mark-all-' + tab.id, title: tip }, view === 'all' ? 'Mark all reviewed' : 'Mark all ' + view + ' reviewed');
+        const label = who !== EVERYONE ? 'Mark all shown reviewed' : view === 'all' ? 'Mark all reviewed' : 'Mark all ' + view + ' reviewed';
+        const all = h('button', { type: 'button', class: 'btn', id: 'mark-all-' + tab.id, title: tip }, label);
         all.disabled = !!marking.all || !state.db;
         all.addEventListener('click', () => markAllReviewed(tab, shownRows));
         tools.push(all);
@@ -942,9 +1060,20 @@ td.when { font-variant-numeric: tabular-nums; }
       if (marking.all) tools.push(h('span', { class: 'msg', role: 'status' }, marking.all));
       kids.push(h('div', { class: 'caption' }, left, h('span', { class: 'actions' }, ...tools, more)));
       if (!shownRows.length) {
-        kids.push(note('No ' + view + ' tickets on this tab', 'Choose All projects to see the rest.'));
+        const what = (who === NO_ONE ? 'unassigned ' : '') + (view === 'all' ? '' : view + ' ') + 'tickets' + (who === EVERYONE || who === NO_ONE ? '' : ' for ' + who);
+        const ways = [view === 'all' ? '' : 'All projects', who === EVERYONE ? '' : 'All assignees'].filter(Boolean).join(' or ');
+        kids.push(note('No ' + what + ' on this tab', 'Choose ' + ways + ' to see the rest.'));
       } else {
-        const cols = ['Key', 'Summary', 'Type', 'Status', 'Assignee', tab.flags ? 'Flagged' : tab.id === 'new' ? 'Created' : 'Updated'];
+        const cols = COLUMNS(tab);
+        // Each heading sorts by its column; aria-sort marks the one in use.
+        const head = cols.map(([col, label]) => {
+          const on = !!sort && sort.col === col;
+          const after = nextSort(sort, col);
+          const b = h('button', { type: 'button', class: 'sorthead', id: 'sort-' + tab.id + '-' + col, title: !after ? 'Back to the default order' : on ? 'Reverse the order' : 'Sort by ' + label },
+            label, h('span', { class: 'sortmark' + (on ? ' ' + sort.dir : ''), 'aria-hidden': 'true' }));
+          b.addEventListener('click', () => { setSort(tab.id, nextSort(sortOf(tab.id), col)); renderKeepFocus(b.id); });
+          return h('th', { scope: 'col', 'aria-sort': on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : null }, b);
+        });
         // A collapsed section keeps only its heading row.
         const bodies = layout === 'type' ? types.map((k) => {
           const list = groups.get(k);
@@ -963,7 +1092,7 @@ td.when { font-variant-numeric: tabular-nums; }
           return h('tbody', { class: 'group' }, h('tr', { class: 'grouphead' }, h('th', { colspan: String(cols.length), scope: 'rowgroup' }, btn)), open ? list.map((x) => row(x, tab)) : null);
         }) : [h('tbody', null, shownRows.map((x) => row(x, tab)))];
         kids.push(h('div', { class: 'tablewrap' }, h('table', { class: layout === 'type' ? 'grouped' : null },
-          h('thead', null, h('tr', null, cols.map((c) => h('th', { scope: 'col' }, c)))),
+          h('thead', null, h('tr', null, head)),
           bodies
         )));
       }
@@ -1270,7 +1399,8 @@ td.when { font-variant-numeric: tabular-nums; }
         && (!x.issueTypes.length || x.issueTypes.includes(row.type)) && statusShown(x, row.status);
       // Keys are quoted: some, such as CF, are JQL reserved words.
       const projectScope = 'project in (' + projects.map(quote).join(', ') + ')';
-      const order = ' ORDER BY updated DESC';
+      // New Tickets by creation, so the row cap keeps the newest; the others by their last update.
+      const order = (id) => (id === 'new' ? ' ORDER BY created DESC' : ' ORDER BY updated DESC');
       const base = r.site.replace(/\/+$/, '');
       const nowIso = now.toISOString();
       const rel = '-' + minutes + 'm';
@@ -1281,9 +1411,9 @@ td.when { font-variant-numeric: tabular-nums; }
         recent: projectScope + clause(f.recent) + ' AND updated >= @ AND created < @',
         mine: 'assignee = currentUser() AND statusCategory != Done' + clause(f.mine),
       };
-      const shown = (id) => q[id].split('@').join(abs) + order;
+      const shown = (id) => q[id].split('@').join(abs) + order(id);
       const search = (id) => jira('searchJiraIssuesUsingJql', {
-        cloudId: r.site, jql: q[id].split('@').join(rel) + order, maxResults: CAP, searchResultMode: 'all', fields: FIELDS,
+        cloudId: r.site, jql: q[id].split('@').join(rel) + order(id), maxResults: CAP, searchResultMode: 'all', fields: FIELDS,
       }).then(dataOf);
       const [dNew, dRecent, dMine] = await Promise.all([search('new'), search('recent'), search('mine')]);
       // A ticket seen before keeps the time it first came in, for the "from Fri" chip.

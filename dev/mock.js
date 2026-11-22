@@ -13,12 +13,16 @@
   const since = iso(49 * H);
   const seenNow = iso(0.8 * H);
   // Every ticket here is made up; keep real tickets, names and workflows out of this file.
+  // Saved in update order, as older tabs were: APP-99 was created first but updated last, so the page's
+  // default order (newest created first) moves it down, and sorting by Key puts it before APP-401.
   const newRows = [
+    mk('APP-99', 'Remember the last report filter per user', 'Story', 'To Do', 'To Do', 'Priya Raman', 20, 0.5, { seen: seenNow }),
     mk('APP-412', 'Saved filters disappear after signing out and back in', 'Bug', 'In Progress', 'In Progress', 'Priya Raman', 3, 1, { seen: seenNow }),
     mk('APP-411', 'Move the nightly build to the new base image', 'Task', 'To Do', 'To Do', 'Tomás Ortega', 8, 3, { seen: seenNow }),
     mk('WEB-88', 'Resume large file uploads after a dropped connection', 'Sub-task', 'In Progress', 'In Progress', null, 13, 2, { seen: seenNow }),
     mk('APP-401', 'CSV export times out on large reports', 'Bug', 'Blocked', 'To Do', 'Mei Chen', 80, 60, { seen: iso(72 * H), carried: true }),
   ];
+  const byKey = (k) => newRows.find((x) => x.key === k);
   const recentRows = [
     mk('APP-350', 'Sign-in page shows an old error after a password change', 'Bug', 'In Review', 'In Progress', 'Jonas Becker', 400, 5, { seen: seenNow }),
     mk('WEB-70', 'Show upload progress for each file', 'Sub-task', 'In Review', 'In Progress', 'Aisha Bello', 300, 9, { seen: seenNow }),
@@ -35,14 +39,14 @@
       types: [['Bug', false], ['Task', false], ['Story', false], ['Sub-task', true]].map(([name, subtask]) => ({ name, subtask })),
       statuses: [['To Do', 'To Do'], ['Blocked', 'To Do'], ['Backlog', 'To Do'], ['In Progress', 'In Progress'], ['In Review', 'In Progress'], ['Done', 'Done']].map(([name, category]) => ({ name, category })),
     },
-    'tabs/new': { rows: newRows, total: 3, carried: 1, issueTypes: [], searchUrl: jql('project in (APP, WEB) AND created >= "2026-10-30 08:00" ORDER BY updated DESC') },
+    'tabs/new': { rows: newRows, total: 4, carried: 1, issueTypes: [], searchUrl: jql('project in (APP, WEB) AND created >= "2026-10-30 08:00" ORDER BY updated DESC') },
     'tabs/recent': { rows: recentRows, total: 2, carried: 0, issueTypes: [], searchUrl: jql('project in (APP, WEB) AND updated >= "2026-10-30 08:00" ORDER BY updated DESC') },
     'tabs/mine': { rows: mineRows, total: 2, searchUrl: jql('assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC') },
     // APP-411 reviewed and unchanged since; WEB-88 reviewed but updated after, so it reads as not reviewed.
-    'reviews/APP-411': { reviewedAt: iso(2 * H), updated: newRows[1].updated },
+    'reviews/APP-411': { reviewedAt: iso(2 * H), updated: byKey('APP-411').updated },
     'reviews/WEB-88': { reviewedAt: iso(4 * H), updated: iso(5 * H) },
     // Flags: APP-401 (on New) and APP-300 (on My Tickets) show their tab rows; OPS-17 is on no tab, so it shows its saved copy.
-    'flags/APP-401': { flaggedAt: iso(20 * H), note: 'Blocked for a week: who owns the export service now?', row: { ...newRows[3] } },
+    'flags/APP-401': { flaggedAt: iso(20 * H), note: 'Blocked for a week: who owns the export service now?', row: { ...byKey('APP-401') } },
     'flags/APP-300': { flaggedAt: iso(6 * H), note: '', row: { ...mineRows[0] } },
     'flags/OPS-17': { flaggedAt: iso(120 * H), note: "Raise at Thursday's planning", row: mk('OPS-17', 'Rotate the staging database credentials', 'Task', 'To Do', 'To Do', 'Mei Chen', 300, 130) },
   };
@@ -52,7 +56,7 @@
   if (mode === 'noschedule') { const { schedule, ...rest } = docs['refresh/main']; docs['refresh/main'] = rest; }
   if (mode === 'legacyhide') {
     docs['settings/main'] = { tabs: { new: { issueTypes: [], ignoreStatuses: ['Blocked'] } } };
-    docs['tabs/new'] = { ...docs['tabs/new'], rows: newRows.slice(0, 3), carried: 0, ignoreStatuses: ['Blocked'] };
+    docs['tabs/new'] = { ...docs['tabs/new'], rows: newRows.filter((x) => !x.carried), carried: 0, ignoreStatuses: ['Blocked'] };
   }
   window.__mockDocs = docs;
 
@@ -107,8 +111,9 @@
         list = [...q.matchAll(/"([^"]+)"/g)].map((m) => now[m[1]]).filter(Boolean);
       } else if (q.includes('currentUser()')) list = mineRows.concat([mk('APP-280', 'Clarify the empty state on the reports page', 'Task', 'To Do', 'To Do', 'You', 700, 1)]);
       // Recent: WEB-70 again, plus APP-401 (carried on New) updated since, and a fresh one.
-      else if (q.includes('updated >=')) list = [recentRows[1], { ...newRows[3], status: 'In Progress', statusCategory: 'In Progress', updated: iso(0.5 * H) }, mk('APP-360', 'Archive old report exports', 'Task', 'Backlog', 'To Do', null, 200, 2)];
-      else list = newRows.slice(0, 2).concat([mk('APP-413', 'Add a dark mode to the admin pages', 'Story', 'To Do', 'To Do', 'Sam Okafor', 0.4, 0.3)]);
+      else if (q.includes('updated >=')) list = [recentRows[1], { ...byKey('APP-401'), status: 'In Progress', statusCategory: 'In Progress', updated: iso(0.5 * H) }, mk('APP-360', 'Archive old report exports', 'Task', 'Backlog', 'To Do', null, 200, 2)];
+      // New Tickets, newest created first: a fresh one, then two from before.
+      else list = [mk('APP-413', 'Add a dark mode to the admin pages', 'Story', 'To Do', 'To Do', 'Sam Okafor', 0.4, 0.3), byKey('APP-412'), byKey('APP-411')];
       return { payload: { data: { totalCount: list.length, isLast: true, issues: list.map(asIssue) } } };
     },
   };

@@ -24,7 +24,9 @@ marketplace (see [Install](#install)).
 - **Flagged:** every ticket you've flagged for discussion, with its note.
 
 Each search tab shows a summary (counts by project and status), the tickets
-most recently updated first, and the query it ran.
+(newest first on New Tickets, most recently updated first on the others),
+and the query it ran. Click a column heading to sort by it, and pick a
+project or an assignee to show only theirs.
 
 ### Reviewing
 
