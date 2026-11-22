@@ -365,7 +365,7 @@ td.when { font-variant-numeric: tabular-nums; }
     </div>
   </details>
   <!-- The plugin version this page was built from; dev/build-preview.ps1 checks it matches .claude-plugin/plugin.json. -->
-  <footer class="foot">jira-dashboard <code id="page-version">0.8.1</code></footer>
+  <footer class="foot">jira-dashboard <code id="page-version">0.8.2</code></footer>
 </div>
 
 <script>
@@ -930,7 +930,11 @@ td.when { font-variant-numeric: tabular-nums; }
       const left = h('span', { class: 'actions' }, picker, layoutPick, foldAll, h('span', null, tab.flags ? 'Most recently flagged first' : 'Most recently updated first', filterText, view === 'all' ? '' : ' · ' + shownRows.length + ' of ' + rows.length + ' rows'));
       const tools = [];
       if (tab.review && shownRows.some((x) => !isReviewed(x))) {
-        const all = h('button', { type: 'button', class: 'btn', id: 'mark-all-' + tab.id }, view === 'all' ? 'Mark all reviewed' : 'Mark all ' + view + ' reviewed');
+        const n = shownRows.filter((x) => !isReviewed(x) && keyOk(x.key)).length;
+        const tip = 'Ticks Reviewed on ' + (n === 1 ? 'the 1 unreviewed ' : 'all ' + n + ' unreviewed ') + (view === 'all' ? '' : view + ' ') + (n === 1 ? 'ticket' : 'tickets')
+          + ' on this tab, collapsed sections included. Reviewed tickets leave the tab at the next refresh'
+          + (tab.id === 'recent' ? ' and come back if they change again.' : '; one that changes later shows on Recent.');
+        const all = h('button', { type: 'button', class: 'btn', id: 'mark-all-' + tab.id, title: tip }, view === 'all' ? 'Mark all reviewed' : 'Mark all ' + view + ' reviewed');
         all.disabled = !!marking.all || !state.db;
         all.addEventListener('click', () => markAllReviewed(tab, shownRows));
         tools.push(all);
